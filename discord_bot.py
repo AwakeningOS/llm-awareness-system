@@ -359,8 +359,29 @@ def chat_with_llm_mcp(
     else:
         logger.info("No insights found to inject")
 
-    # Add memory and insights to system prompt
-    system_prompt = SYSTEM_PROMPT + memory_context + insight_context
+    # Search recent emotional states (background & emotion from thinking habits)
+    emotional_states = memory.search("emotional", user_id=user_id, limit=3, category="emotional_state")
+    emotional_context = ""
+    if emotional_states:
+        emotional_context = "\n\n## Your Recent Emotional States (Self-awareness context):\n"
+        for e in emotional_states:
+            content = e.get('content', '')
+            metadata = e.get('metadata', {})
+            if '[Emotional State]' in content:
+                content = content.replace('[Emotional State]', '').strip()
+            background = metadata.get('background', '')
+            if background:
+                emotional_context += f"- Emotion: {content}\n"
+                emotional_context += f"  Context: {background}\n"
+            else:
+                emotional_context += f"- {content}\n"
+        emotional_context += "\nUse this emotional awareness to respond authentically, not mechanically.\n"
+        logger.info(f"Injecting {len(emotional_states)} emotional states into system prompt")
+    else:
+        logger.info("No emotional states found to inject")
+
+    # Add memory, insights, and emotional context to system prompt
+    system_prompt = SYSTEM_PROMPT + memory_context + insight_context + emotional_context
 
     try:
         # LM Studio v1 API (0.4.0+) with MCP
@@ -641,6 +662,24 @@ async def run_thinking_habits(user_id: str, user_input: str, assistant_output: s
                     }
                 )
                 logger.info(f"ChromaDB auto-save: Meta-insight")
+
+            # Save emotional state for next response context
+            emotion_data = reflection.get("emotion", {})
+            background_data = reflection.get("background", {})
+            if emotion_data.get("label"):
+                memory.save(
+                    content=f"[Emotional State] {emotion_data.get('label')}: {emotion_data.get('note', '')}",
+                    category="emotional_state",
+                    importance=6,
+                    user_id=user_id,
+                    metadata={
+                        "emotion": emotion_data.get("label"),
+                        "forcing": emotion_data.get("forcing", False),
+                        "background": background_data.get("statement", "")[:200],
+                        "background_source": background_data.get("source", "unknown")
+                    }
+                )
+                logger.info(f"ChromaDB auto-save: Emotional state ({emotion_data.get('label')})")
 
             # Auto-save high satisfaction conversations (important dialogue)
             satisfaction = reflection.get("user_perspective", {}).get("satisfaction", 0)
