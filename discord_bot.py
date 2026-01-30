@@ -102,10 +102,10 @@ training_notifier = TrainingNotifier(lora_trainer)
 # Self-reflection engine
 self_reflection_engine = SelfReflectionEngine()
 
-# Realtime observer (30% probability for detailed observation, always detect discomfort)
+# Realtime observer (100% probability - FULL OPEN MODE)
 realtime_observer = RealtimeObserver(
     self_reflection_engine,
-    observation_probability=0.3,
+    observation_probability=1.0,  # 100% - always observe
     always_detect_discomfort=True
 )
 
@@ -142,7 +142,8 @@ async def on_session_end(session: Session):
     awareness_list = await asyncio.to_thread(
         awareness_engine.extract_awareness,
         session_log,
-        session.user_id
+        session.user_id,
+        True  # use_enhanced=True: Full introspection mode
     )
 
     if not awareness_list:
@@ -888,7 +889,8 @@ async def cmd_awareness(ctx: commands.Context, action: str = None, *, args: str 
         awareness_list = await asyncio.to_thread(
             awareness_engine.extract_awareness,
             session_log,
-            user_id
+            user_id,
+            True  # use_enhanced=True: Full introspection mode
         )
 
         if not awareness_list:
