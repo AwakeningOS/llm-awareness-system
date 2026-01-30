@@ -1,0 +1,42 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Data (ユーザー固有のデータ)
+data/
+logs/
+workspace/
+
+# ChromaDB
+*.sqlite3
+
+# Secrets (トークン等が含まれる可能性のあるファイル)
+config.py
+
+# Test files
+test_*.py
+clear_chromadb.py
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
