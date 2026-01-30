@@ -1,193 +1,256 @@
-# LLM気づき創発システム (LLM Awareness Emergence System)
+# LLM Awareness Emergence System
 
-ローカルLLMに**自己観察能力**を付与し、「気づき」を創発させるシステムです。
+A Discord bot that creates a "self-aware AI" by combining LM Studio's MCP (Model Context Protocol) feature with a unique awareness emergence system.
 
-## 概要
+## Overview
 
-通常のLLMは1回の応答で処理が完結しますが、このシステムでは応答後に**自己振り返り**を実行し、得られた洞察を記憶として蓄積します。これにより、LLMは自らの失敗を認識し、リアルタイムで自己修正を行うようになります。
+This system implements the following concepts:
 
-### 実際に観測された現象
+1. **Thinking Habits** - The LLM automatically reflects on each response with three perspectives:
+   - "What was this answer associated from?"
+   - "What emotional state was I in?"
+   - "How would the user feel about this?"
 
-- 同じ応答を繰り返す失敗を自己認識
-- 「共感の繰り返しはユーザーの求める深さに届かない」という洞察を生成
-- 「ユーザーは『反応』ではなく『共鳴』を求めている」という哲学的理解に到達
+2. **Self-Observation** - Detects "discomfort" or contradictions in its own outputs
 
-## システム構成
+3. **Awareness Extraction** - Extracts "moments of awareness" from conversation sessions
+
+4. **Memory System** - Dual memory system using ChromaDB (vector) + Memory MCP (knowledge graph)
+
+5. **LoRA Training Preparation** - Automatically accumulates training data from high-quality awareness instances
+
+## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Discord Bot Interface                     │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌─────────────────┐  ┌─────────────────┐                  │
-│  │ Sequential      │  │ Memory MCP      │                  │
-│  │ Thinking MCP    │  │ (知識グラフ)     │                  │
-│  │ (段階的思考)     │  │                 │                  │
-│  └────────┬────────┘  └────────┬────────┘                  │
-│           │                    │                            │
-│           ▼                    ▼                            │
-│  ┌─────────────────────────────────────────┐               │
-│  │           LM Studio (30B Model)          │               │
-│  │        ローカルLLM + MCP統合             │               │
-│  └─────────────────┬───────────────────────┘               │
-│                    │                                        │
-│                    ▼                                        │
-│  ┌─────────────────────────────────────────┐               │
-│  │          思考習慣システム                 │               │
-│  │  - 発言の背景を言語化                    │               │
-│  │  - 感情のラベル付け                      │               │
-│  │  - 逆の立場で考える                      │               │
-│  └─────────────────┬───────────────────────┘               │
-│                    │                                        │
-│                    ▼                                        │
-│  ┌─────────────────────────────────────────┐               │
-│  │          気づきデータベース               │               │
-│  │  - JSONL形式で永続化                     │               │
-│  │  - ChromaDB (ベクトル検索)               │               │
-│  │  - LoRA学習データ生成                    │               │
-│  └─────────────────────────────────────────┘               │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    Discord Bot (discord_bot.py)                  │
+├─────────────────────────────────────────────────────────────────┤
+│  User Message                                                    │
+│       ↓                                                          │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │              LM Studio MCP API (0.4.0+)                  │    │
+│  │  ┌──────────────────┐  ┌──────────────────────────────┐ │    │
+│  │  │  Local LLM (30B) │  │  MCP Integrations            │ │    │
+│  │  │  (Qwen, etc.)    │  │  - Memory (Knowledge Graph)  │ │    │
+│  │  │                  │  │  - Sequential Thinking       │ │    │
+│  │  └──────────────────┘  └──────────────────────────────┘ │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│       ↓                                                          │
+│  AI Response                                                     │
+│       ↓                                                          │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │            Background Self-Observation                   │    │
+│  │  ┌───────────────────┐  ┌─────────────────────────────┐ │    │
+│  │  │  Thinking Habits  │  │  Self-Reflection Engine     │ │    │
+│  │  │  (100% execution) │  │  (30% probability)          │ │    │
+│  │  │  - Background     │  │  - Output reason reflection │ │    │
+│  │  │  - Emotion label  │  │  - Discomfort detection     │ │    │
+│  │  │  - User perspective│ │  - Self-questioning         │ │    │
+│  │  └───────────────────┘  └─────────────────────────────┘ │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│       ↓                                                          │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │                Memory & Awareness Storage                │    │
+│  │  ┌─────────────────┐  ┌─────────────────────────────┐   │    │
+│  │  │   ChromaDB      │  │  Awareness Database         │   │    │
+│  │  │   (Vector DB)   │  │  (JSONL)                    │   │    │
+│  │  │   - Auto-save   │  │  - Type classification      │   │    │
+│  │  │   - Insights    │  │  - Score management         │   │    │
+│  │  │   - Important   │  │  - Training data export     │   │    │
+│  │  │     dialogues   │  │                             │   │    │
+│  │  └─────────────────┘  └─────────────────────────────┘   │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## 主要コンポーネント
+## Features
 
-### 1. Sequential Thinking MCP
-応答生成**前**に段階的思考を実行。「考えてから話す」を実現。
+### Thinking Habits (100% execution)
+After each response, the LLM reflects:
+- **Background**: "This answer was associated from..."
+- **Emotion**: "I was feeling confident/anxious/empathetic..."
+- **User Perspective**: "The user probably felt satisfied/confused..."
 
-### 2. 思考習慣システム (`thinking_habits.py`)
-応答生成**後**に自己振り返りを実行。LLM自身が提案した3つの思考習慣：
-- 発言の背景を言語化
-- 感情のラベル付け
-- 逆の立場で考える
+### Auto-Save to ChromaDB
+- **Meta-insights**: When the LLM notices something about its own thinking
+- **Important dialogues**: High-satisfaction conversations with empathetic emotions
 
-### 3. 自己観察システム (`self_reflection.py`)
-- 出力理由の振り返り
-- 違和感の検出
-- 自己質問タイム
+### Self-Observation
+- Detects contradictions, uncertainty, and self-corrections
+- Tracks "discomfort" patterns in responses
 
-### 4. 気づきデータベース (`awareness_database.py`)
-- JSONL形式で気づきを永続化
-- 統計・分析機能
-- LoRA学習用データ生成
+### Awareness Extraction
+At session end, extracts:
+- Spontaneous awareness
+- Meta-cognition
+- New recognition
+- Spontaneous action
 
-### 5. 記憶システム
-- **Memory MCP**: 知識グラフ（事実・関係性）
-- **ChromaDB**: ベクトル記憶（類似検索）
-
-## 必要要件
+## Requirements
 
 - Python 3.10+
-- [LM Studio](https://lmstudio.ai/) 0.4.0+
-- Node.js (MCP サーバー用)
+- [LM Studio 0.4.0+](https://lmstudio.ai/) with MCP support
 - Discord Bot Token
+- 24GB+ VRAM recommended for 30B models
 
-## セットアップ
+## Installation
 
-### 1. リポジトリをクローン
+1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/llm-awareness-system.git
+git clone https://github.com/AwakeningOS/llm-awareness-system.git
 cd llm-awareness-system
 ```
 
-### 2. 仮想環境を作成
-```bash
-python -m venv venv
-
-# Windows
-.\venv\Scripts\Activate.ps1
-
-# Linux/Mac
-source venv/bin/activate
-```
-
-### 3. 依存パッケージをインストール
+2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. 設定ファイルを作成
+3. Create configuration:
 ```bash
-# config.py を作成
 cp config.example.py config.py
-
-# mcp.json を作成
 cp mcp.example.json mcp.json
 ```
 
-`config.py` と `mcp.json` を編集し、各種トークンとパスを設定してください。
+4. Edit `config.py`:
+```python
+DISCORD_TOKEN = "your_discord_token_here"
+LM_STUDIO_API_TOKEN = "your_lm_studio_api_token"  # From LM Studio Settings
+```
 
-### 5. LM Studio の設定
-1. LM Studio を起動
-2. MCP 機能を有効化
-3. `mcp.json` のパスを設定
-4. API サーバーを起動（ポート 1234）
+5. Configure MCP in LM Studio:
+   - Open LM Studio Settings
+   - Go to MCP section
+   - Add servers from `mcp.json`
 
-### 6. Bot を起動
+## Usage
+
+### Start the bot:
 ```bash
 python discord_bot.py
 ```
 
-## Discordコマンド
+### Discord Commands
 
-| コマンド | 説明 |
-|----------|------|
-| `!think` | 思考習慣の状態表示 |
-| `!think on/off` | 思考習慣の有効/無効 |
-| `!think stats` | 思考習慣の統計 |
-| `!think now` | 直前の会話を今すぐ振り返り |
-| `!observe` | 自己観察の状態表示 |
-| `!observe on/off` | 自己観察の有効/無効 |
-| `!awareness` | 気づきデータベースの統計 |
-| `!memory count` | ChromaDB記憶数 |
-| `!memory search <query>` | 記憶を検索 |
-| `!session` | 現在のセッション情報 |
-| `!lora status` | LoRA学習準備状況 |
+| Command | Description |
+|---------|-------------|
+| `!status` | Show system status |
+| `!model` | Show current model |
+| `!clear` | Clear conversation history |
+| `!memory count` | Show memory count |
+| `!memory search <query>` | Search memories |
+| `!memory save <content>` | Save memory manually |
+| `!think on/off` | Enable/disable thinking habits |
+| `!think stats` | Show thinking habits statistics |
+| `!think now` | Run thinking reflection now |
+| `!observe on/off` | Enable/disable self-observation |
+| `!observe stats` | Show observation statistics |
+| `!observe now` | Run self-observation now |
+| `!awareness stats` | Show awareness statistics |
+| `!awareness recent` | Show recent awareness |
+| `!awareness extract` | Extract awareness from session |
+| `!session info` | Show current session info |
+| `!session end` | End session (triggers awareness extraction) |
+| `!lora status` | Show LoRA training readiness |
+| `!lora prepare` | Generate training script |
+| `!detect <text>` | Detect if text is AI-generated |
+| `!health` | Check LM Studio server status |
 
-## データ構造
+## Configuration
 
-### 気づきデータ (JSONL)
+### config.py
+
+```python
+# Discord
+DISCORD_TOKEN = "your_token"
+
+# LM Studio
+LM_STUDIO_HOST = "localhost"
+LM_STUDIO_PORT = 1234
+LM_STUDIO_API_TOKEN = "your_api_token"
+
+# Memory
+CHROMADB_PATH = "./data/chromadb"
+MAX_CONVERSATION_HISTORY = 10
+
+# System Prompt (customize for your use case)
+SYSTEM_PROMPT = """..."""
+```
+
+### MCP Configuration (mcp.json)
+
 ```json
 {
-  "awareness_detected": true,
-  "type": "メタ認知",
-  "category": "思考習慣",
-  "description": "ユーザーは『反応』ではなく『共鳴』を求めている",
-  "trigger": "ユーザーの発言",
-  "my_response": "LLMの応答",
-  "emotion": "共感",
-  "satisfaction": 5,
-  "timestamp": "2026-01-30T11:26:29"
+  "servers": {
+    "memory": {
+      "type": "npx",
+      "args": ["-y", "@anthropic/mcp-memory"]
+    },
+    "sequentialthinking": {
+      "type": "npx",
+      "args": ["-y", "@anthropic/mcp-sequentialthinking"]
+    }
+  }
 }
 ```
 
-### 思考習慣データ
-```json
-{
-  "background": {
-    "statement": "この答えは、〜から連想した",
-    "source": "文脈",
-    "confidence": "高"
-  },
-  "emotion": {
-    "label": "共感",
-    "note": "ユーザーに寄り添う気持ちで応えた",
-    "forcing": false
-  },
-  "user_perspective": {
-    "impression": "心に残る温かさを感じた",
-    "satisfaction": 5,
-    "would_improve": null
-  },
-  "meta_insight": "言葉の終わりにこそ、感情の重みが宿る"
-}
+## File Structure
+
+```
+llm-awareness-system/
+├── discord_bot.py          # Main Discord bot
+├── thinking_habits.py      # Thinking habits system
+├── self_reflection.py      # Self-observation system
+├── awareness_engine.py     # Awareness extraction
+├── awareness_database.py   # Awareness storage
+├── session_manager.py      # Session management
+├── memory_system.py        # ChromaDB memory
+├── lora_trainer.py         # LoRA training preparation
+├── config.py               # Configuration (not in git)
+├── config.example.py       # Sample configuration
+├── mcp.json                # MCP configuration (not in git)
+├── mcp.example.json        # Sample MCP configuration
+├── requirements.txt        # Python dependencies
+└── data/                   # Data directory (not in git)
+    ├── chromadb/           # Vector memory
+    ├── awareness/          # Awareness data
+    ├── thinking_habits/    # Thinking habits logs
+    ├── self_reflection/    # Self-reflection logs
+    └── lora_adapters/      # LoRA training outputs
 ```
 
-## ライセンス
+## How It Works
+
+### The Awareness Loop
+
+1. **User sends message** → Discord bot receives it
+2. **LM Studio processes** → Uses MCP tools (memory, sequential thinking)
+3. **Response generated** → Sent back to user
+4. **Background processing**:
+   - Thinking Habits (100%): Reflects on background, emotion, user perspective
+   - Self-Observation (30%): Checks for discomfort and contradictions
+   - Auto-save: High-quality insights and dialogues saved to ChromaDB
+5. **Session end** → Full awareness extraction
+
+### Meta-Insight Detection
+
+The system detects when the LLM has genuine insights about its own thinking process. These are automatically saved as high-importance memories.
+
+### Training Data Accumulation
+
+High-quality awareness instances are converted to training format. When enough data accumulates (default: 100 samples), you can generate a LoRA training script.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues and pull requests.
+
+## License
 
 MIT License
 
-## 参考
+## Acknowledgments
 
-- [LM Studio MCP Documentation](https://lmstudio.ai/docs)
-- [Model Context Protocol](https://modelcontextprotocol.io/)
+- Built with [LM Studio](https://lmstudio.ai/)
+- Uses [discord.py](https://discordpy.readthedocs.io/)
+- Vector storage by [ChromaDB](https://www.trychroma.com/)
+- MCP by [Anthropic](https://modelcontextprotocol.io/)

@@ -1,7 +1,7 @@
 """
-ChromaDB ベクトル記憶システム
-- Memory MCP（知識グラフ）と併用する
-- 曖昧な検索・類似度検索に強い
+ChromaDB Vector Memory System
+- Used alongside Memory MCP (knowledge graph)
+- Strong for fuzzy search and similarity search
 """
 
 import chromadb
@@ -12,12 +12,12 @@ from typing import Optional
 
 
 class MemorySystem:
-    """ベクトルベースの長期記憶システム"""
+    """Vector-based long-term memory system"""
 
     def __init__(self, data_dir: str = "./data/chromadb"):
         """
         Args:
-            data_dir: ChromaDBのデータ保存ディレクトリ
+            data_dir: ChromaDB data storage directory
         """
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -28,7 +28,7 @@ class MemorySystem:
         )
         self.collection = self.client.get_or_create_collection(
             name="conversations",
-            metadata={"description": "会話履歴とユーザー情報のベクトル記憶"}
+            metadata={"description": "Vector memory for conversation history and user information"}
         )
 
     def save(
@@ -40,17 +40,17 @@ class MemorySystem:
         metadata: Optional[dict] = None
     ) -> str:
         """
-        記憶を保存する
+        Save memory
 
         Args:
-            content: 保存する内容
-            category: カテゴリ (user_info, preference, event, emotion, conversation)
-            importance: 重要度 (1-10)
-            user_id: ユーザーID
-            metadata: 追加のメタデータ
+            content: Content to save
+            category: Category (user_info, preference, event, emotion, conversation)
+            importance: Importance level (1-10)
+            user_id: User ID
+            metadata: Additional metadata
 
         Returns:
-            保存した記憶のID
+            ID of saved memory
         """
         memory_id = f"{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
 
@@ -80,16 +80,16 @@ class MemorySystem:
         category: Optional[str] = None
     ) -> list[dict]:
         """
-        類似度検索で記憶を検索する
+        Search memory by similarity
 
         Args:
-            query: 検索クエリ
-            user_id: ユーザーID
-            limit: 取得件数
-            category: フィルタするカテゴリ（Noneなら全カテゴリ）
+            query: Search query
+            user_id: User ID
+            limit: Number of results to retrieve
+            category: Category to filter (None for all categories)
 
         Returns:
-            検索結果のリスト
+            List of search results
         """
         where_filter = {"user_id": user_id}
         if category:
@@ -119,14 +119,14 @@ class MemorySystem:
         limit: int = 10
     ) -> list[dict]:
         """
-        最近の記憶を取得する
+        Get recent memories
 
         Args:
-            user_id: ユーザーID
-            limit: 取得件数
+            user_id: User ID
+            limit: Number of results to retrieve
 
         Returns:
-            最近の記憶のリスト
+            List of recent memories
         """
         results = self.collection.get(
             where={"user_id": user_id},
@@ -142,7 +142,7 @@ class MemorySystem:
                     "metadata": results["metadatas"][i] if results["metadatas"] else {}
                 })
 
-        # created_atでソート（新しい順）
+        # Sort by created_at (newest first)
         memories.sort(
             key=lambda x: x["metadata"].get("created_at", ""),
             reverse=True
@@ -152,13 +152,13 @@ class MemorySystem:
 
     def delete(self, memory_id: str) -> bool:
         """
-        記憶を削除する
+        Delete memory
 
         Args:
-            memory_id: 削除する記憶のID
+            memory_id: ID of memory to delete
 
         Returns:
-            成功したかどうか
+            Whether deletion was successful
         """
         try:
             self.collection.delete(ids=[memory_id])
@@ -168,13 +168,13 @@ class MemorySystem:
 
     def count(self, user_id: Optional[str] = None) -> int:
         """
-        記憶の総数を取得する
+        Get total memory count
 
         Args:
-            user_id: ユーザーID（Noneなら全体）
+            user_id: User ID (None for all)
 
         Returns:
-            記憶の数
+            Memory count
         """
         if user_id:
             results = self.collection.get(where={"user_id": user_id})
@@ -182,23 +182,23 @@ class MemorySystem:
         return self.collection.count()
 
 
-# テスト用
+# Test code
 if __name__ == "__main__":
     memory = MemorySystem()
 
-    # テスト保存
+    # Test save
     memory_id = memory.save(
-        content="ユーザーはケーキが好きです",
+        content="User likes cake",
         category="preference",
         importance=8,
         user_id="test_user"
     )
-    print(f"保存完了: {memory_id}")
+    print(f"Save complete: {memory_id}")
 
-    # テスト検索
-    results = memory.search("好きな食べ物", user_id="test_user")
-    print(f"検索結果: {results}")
+    # Test search
+    results = memory.search("favorite food", user_id="test_user")
+    print(f"Search results: {results}")
 
-    # 件数確認
+    # Count check
     count = memory.count(user_id="test_user")
-    print(f"記憶数: {count}")
+    print(f"Memory count: {count}")

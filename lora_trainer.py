@@ -1,8 +1,8 @@
 """
-LoRA学習トリガー
-- 一定量の蓄積で通知
-- 人間の承認で学習実行
-- 学習スクリプトの生成
+LoRA Training Trigger
+- Notification when sufficient data accumulated
+- Training execution with human approval
+- Training script generation
 """
 
 import json
@@ -16,7 +16,7 @@ from awareness_database import AwarenessDatabase
 
 logger = logging.getLogger(__name__)
 
-# デフォルトのLoRA設定
+# Default LoRA configuration
 DEFAULT_LORA_CONFIG = {
     "base_model": "google/gemma-3-4b-pt",
     "r": 32,
@@ -35,7 +35,7 @@ DEFAULT_LORA_CONFIG = {
 
 
 class LoRATrainer:
-    """LoRA学習管理"""
+    """LoRA Training Manager"""
 
     def __init__(
         self,
@@ -45,25 +45,25 @@ class LoRATrainer:
     ):
         """
         Args:
-            database: 気づきデータベース
-            config: LoRA設定（Noneならデフォルト）
-            output_dir: アダプター出力ディレクトリ
+            database: Awareness database
+            config: LoRA configuration (None for default)
+            output_dir: Adapter output directory
         """
         self.db = database
         self.config = config or DEFAULT_LORA_CONFIG
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # 学習スクリプト保存ディレクトリ
+        # Training script storage directory
         self.scripts_dir = self.output_dir / "scripts"
         self.scripts_dir.mkdir(parents=True, exist_ok=True)
 
     def check_readiness(self) -> dict:
-        """学習準備状況をチェック"""
+        """Check training readiness"""
         return self.db.get_training_readiness(self.config["min_samples"])
 
     def prepare_training_data(self, min_score: int = 3) -> Path:
-        """学習データを準備"""
+        """Prepare training data"""
         export_path = self.db.export_training_data(min_score=min_score)
         return export_path
 
@@ -73,14 +73,14 @@ class LoRATrainer:
         output_name: Optional[str] = None
     ) -> Path:
         """
-        学習スクリプトを生成
+        Generate training script
 
         Args:
-            training_data_path: 学習データのパス
-            output_name: 出力アダプター名
+            training_data_path: Path to training data
+            output_name: Output adapter name
 
         Returns:
-            生成したスクリプトのパス
+            Generated script path
         """
         if output_name is None:
             output_name = f"awareness_lora_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -88,11 +88,11 @@ class LoRATrainer:
         adapter_output_dir = self.output_dir / output_name
 
         script_content = f'''#!/bin/bash
-# 気づき創発システム - LoRA学習スクリプト
-# 生成日時: {datetime.now().isoformat()}
-# 学習データ: {training_data_path}
+# Awareness Emergence System - LoRA Training Script
+# Generated: {datetime.now().isoformat()}
+# Training data: {training_data_path}
 
-# 依存関係のインストール（必要に応じて）
+# Install dependencies (if needed)
 # pip install transformers peft accelerate bitsandbytes datasets
 
 python -m torch.distributed.launch --nproc_per_node=1 \\
@@ -114,14 +114,14 @@ python -m torch.distributed.launch --nproc_per_node=1 \\
     --fp16 \\
     --report_to none
 
-echo "学習完了: {adapter_output_dir}"
+echo "Training complete: {adapter_output_dir}"
 '''
 
         script_path = self.scripts_dir / f"train_{output_name}.sh"
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(script_content)
 
-        logger.info(f"学習スクリプト生成: {script_path}")
+        logger.info(f"Training script generated: {script_path}")
         return script_path
 
     def generate_python_training_script(
@@ -130,14 +130,14 @@ echo "学習完了: {adapter_output_dir}"
         output_name: Optional[str] = None
     ) -> Path:
         """
-        Python学習スクリプトを生成（より詳細な制御が可能）
+        Generate Python training script (more detailed control)
 
         Args:
-            training_data_path: 学習データのパス
-            output_name: 出力アダプター名
+            training_data_path: Path to training data
+            output_name: Output adapter name
 
         Returns:
-            生成したスクリプトのパス
+            Generated script path
         """
         if output_name is None:
             output_name = f"awareness_lora_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -145,9 +145,9 @@ echo "学習完了: {adapter_output_dir}"
         adapter_output_dir = self.output_dir / output_name
 
         script_content = f'''"""
-気づき創発システム - LoRA学習スクリプト
-生成日時: {datetime.now().isoformat()}
-学習データ: {training_data_path}
+Awareness Emergence System - LoRA Training Script
+Generated: {datetime.now().isoformat()}
+Training data: {training_data_path}
 """
 
 import json
@@ -168,7 +168,7 @@ from peft import (
 )
 import torch
 
-# 設定
+# Configuration
 BASE_MODEL = "{self.config['base_model']}"
 TRAINING_DATA = "{training_data_path}"
 OUTPUT_DIR = "{adapter_output_dir}"
@@ -197,13 +197,13 @@ TRAINING_CONFIG = {{
 
 
 def load_training_data(path: str) -> Dataset:
-    """学習データを読み込む"""
+    """Load training data"""
     data = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             try:
                 item = json.loads(line)
-                # messages形式をテキストに変換
+                # Convert messages format to text
                 messages = item.get("messages", [])
                 text = ""
                 for msg in messages:
@@ -220,12 +220,12 @@ def load_training_data(path: str) -> Dataset:
 
 
 def main():
-    print(f"ベースモデル: {{BASE_MODEL}}")
-    print(f"学習データ: {{TRAINING_DATA}}")
-    print(f"出力先: {{OUTPUT_DIR}}")
+    print(f"Base model: {{BASE_MODEL}}")
+    print(f"Training data: {{TRAINING_DATA}}")
+    print(f"Output: {{OUTPUT_DIR}}")
 
-    # トークナイザーとモデルの読み込み
-    print("モデル読み込み中...")
+    # Load tokenizer and model
+    print("Loading model...")
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -236,18 +236,18 @@ def main():
         device_map="auto"
     )
 
-    # LoRA設定
-    print("LoRA設定中...")
+    # LoRA configuration
+    print("Configuring LoRA...")
     lora_config = LoraConfig(**LORA_CONFIG)
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    # データ読み込み
-    print("データ読み込み中...")
+    # Load data
+    print("Loading data...")
     dataset = load_training_data(TRAINING_DATA)
-    print(f"学習データ数: {{len(dataset)}}")
+    print(f"Training samples: {{len(dataset)}}")
 
-    # トークナイズ
+    # Tokenize
     def tokenize_function(examples):
         return tokenizer(
             examples["text"],
@@ -262,16 +262,16 @@ def main():
         remove_columns=dataset.column_names
     )
 
-    # データコレーター
+    # Data collator
     data_collator = DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
         mlm=False
     )
 
-    # 学習設定
+    # Training arguments
     training_args = TrainingArguments(**TRAINING_CONFIG)
 
-    # トレーナー
+    # Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -279,16 +279,16 @@ def main():
         data_collator=data_collator
     )
 
-    # 学習実行
-    print("学習開始...")
+    # Train
+    print("Starting training...")
     trainer.train()
 
-    # 保存
-    print(f"モデル保存: {{OUTPUT_DIR}}")
+    # Save
+    print(f"Saving model: {{OUTPUT_DIR}}")
     model.save_pretrained(OUTPUT_DIR)
     tokenizer.save_pretrained(OUTPUT_DIR)
 
-    print("学習完了!")
+    print("Training complete!")
 
 
 if __name__ == "__main__":
@@ -299,11 +299,11 @@ if __name__ == "__main__":
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(script_content)
 
-        logger.info(f"Python学習スクリプト生成: {script_path}")
+        logger.info(f"Python training script generated: {script_path}")
         return script_path
 
     def get_available_adapters(self) -> list[dict]:
-        """利用可能なアダプター一覧を取得"""
+        """Get list of available adapters"""
         adapters = []
         for adapter_dir in self.output_dir.iterdir():
             if adapter_dir.is_dir() and adapter_dir.name != "scripts":
@@ -319,7 +319,7 @@ if __name__ == "__main__":
         return adapters
 
     def get_training_status(self) -> dict:
-        """学習状況の概要を取得"""
+        """Get training status overview"""
         readiness = self.check_readiness()
         adapters = self.get_available_adapters()
 
@@ -332,7 +332,7 @@ if __name__ == "__main__":
 
 
 class TrainingNotifier:
-    """学習準備完了の通知"""
+    """Training readiness notifier"""
 
     def __init__(self, trainer: LoRATrainer):
         self.trainer = trainer
@@ -340,54 +340,54 @@ class TrainingNotifier:
 
     def check_and_notify(self) -> Optional[str]:
         """
-        学習準備状況をチェックして通知メッセージを返す
+        Check training readiness and return notification message
 
         Returns:
-            通知メッセージ（通知不要ならNone）
+            Notification message (None if no notification needed)
         """
         readiness = self.trainer.check_readiness()
 
         if readiness["ready"] and readiness["current_samples"] > self.last_notified_count:
             self.last_notified_count = readiness["current_samples"]
             return (
-                f"LoRA学習の準備が整いました！\n"
-                f"蓄積データ: {readiness['current_samples']}件\n"
-                f"必要最小: {readiness['required_samples']}件\n"
+                f"LoRA training is ready!\n"
+                f"Accumulated data: {readiness['current_samples']} samples\n"
+                f"Required minimum: {readiness['required_samples']} samples\n"
                 f"\n"
-                f"学習を開始するには `!lora train` コマンドを実行してください。"
+                f"Run `!lora train` command to start training."
             )
 
-        # 進捗通知（25%, 50%, 75%で通知）
+        # Progress notification (notify at 25%, 50%, 75%)
         progress = readiness["progress_percent"]
         milestones = [25, 50, 75]
         for milestone in milestones:
             if progress >= milestone and self.last_notified_count < milestone:
                 self.last_notified_count = milestone
                 return (
-                    f"学習データ蓄積進捗: {progress:.0f}%\n"
-                    f"現在: {readiness['current_samples']}件 / "
-                    f"目標: {readiness['required_samples']}件"
+                    f"Training data progress: {progress:.0f}%\n"
+                    f"Current: {readiness['current_samples']} / "
+                    f"Target: {readiness['required_samples']}"
                 )
 
         return None
 
 
-# テスト用
+# Test code
 if __name__ == "__main__":
     from awareness_database import AwarenessDatabase
 
-    # テスト用データベース
+    # Test database
     db = AwarenessDatabase(data_dir="./data/awareness_test")
 
-    # トレーナー初期化
+    # Initialize trainer
     trainer = LoRATrainer(db, output_dir="./data/lora_test")
 
-    # 状況確認
+    # Check status
     status = trainer.get_training_status()
-    print(f"学習状況: {json.dumps(status, ensure_ascii=False, indent=2)}")
+    print(f"Training status: {json.dumps(status, ensure_ascii=False, indent=2)}")
 
-    # スクリプト生成テスト
+    # Script generation test
     test_data_path = Path("./data/awareness_test/training_data.jsonl")
     if test_data_path.exists():
         script_path = trainer.generate_python_training_script(test_data_path)
-        print(f"スクリプト生成: {script_path}")
+        print(f"Script generated: {script_path}")

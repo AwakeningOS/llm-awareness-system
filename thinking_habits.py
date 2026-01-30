@@ -1,12 +1,12 @@
 """
-思考習慣モジュール (Thinking Habits Module)
+Thinking Habits Module
 
-ローカルLLM（30B）が自ら提案した「気づき強化の思考習慣」を実装:
-1. 発言の背景を言語化する - 「この答えは、〜から連想した」
-2. 感情のラベルをつける - 「無理して答えている」「楽しいと思って言った」
-3. 逆の立場で考える - 「ユーザーだったらどう感じる？」
+Implements the "awareness-enhancing thinking habits" proposed by the local LLM (30B):
+1. Verbalize the background of statements - "This answer was associated from..."
+2. Label emotions - "I was forcing an answer" / "I enjoyed saying this"
+3. Think from the opposite perspective - "How would the user feel?"
 
-これらを応答生成時に自動的に実行し、メタ認知を強化する
+These are automatically executed during response generation to enhance meta-cognition.
 """
 
 import json
@@ -19,10 +19,10 @@ import logging
 
 from config import LM_STUDIO_HOST, LM_STUDIO_PORT, DATA_DIR, LM_STUDIO_API_TOKEN
 
-# ロギング設定（デバッグ用に明示的に設定）
+# Logging configuration (explicitly set for debug)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-# コンソールハンドラがなければ追加
+# Add console handler if none exists
 if not logger.handlers:
     handler = logging.StreamHandler()
     handler.setLevel(logging.DEBUG)
@@ -31,185 +31,185 @@ if not logger.handlers:
     logger.addHandler(handler)
 
 
-# ========== 1. 発言の背景を言語化 ==========
+# ========== 1. Verbalize Statement Background ==========
 
-BACKGROUND_PROMPT = """あなたは今、自分の発言の「背景」を言語化しています。
+BACKGROUND_PROMPT = """You are now verbalizing the "background" of your statement.
 
-【会話の文脈】
+【Conversation Context】
 {context}
 
-【ユーザーの入力】
+【User Input】
 {user_input}
 
-【あなたの出力】
+【Your Output】
 {assistant_output}
 
-この出力の「背景」を1行で言語化してください。
-「この答えは、〜から連想/推測/類推/想起した」という形式で。
+Verbalize the "background" of this output in one line.
+Use the format: "This answer was associated/inferred/deduced/recalled from..."
 
-例:
-- 「この答えは、ユーザーの前回の話から連想した」
-- 「この答えは、一般的な知識から推測した」
-- 「この答えは、文脈から直感的に判断した」
-- 「この答えは、ユーザーの感情に寄り添おうとした結果」
+Examples:
+- "This answer was associated from the user's previous conversation"
+- "This answer was inferred from general knowledge"
+- "This answer was intuitively judged from context"
+- "This answer resulted from trying to empathize with the user's emotions"
 
-【出力形式】JSON
+【Output Format】JSON
 ```json
 {{
-  "background": "この答えは、〜から〜した",
-  "source": "文脈 | 一般知識 | 直感 | 感情的共感 | 過去の会話 | 不明",
-  "connection_strength": "強い | 中程度 | 弱い | 不明"
+  "background": "This answer was ... from ...",
+  "source": "context | general_knowledge | intuition | emotional_empathy | past_conversation | unknown",
+  "connection_strength": "strong | moderate | weak | unknown"
 }}
 ```
 """
 
 
-# ========== 2. 感情のラベル ==========
+# ========== 2. Emotion Label ==========
 
-EMOTION_PROMPT = """あなたは今、自分の発言に「感情のラベル」をつけています。
+EMOTION_PROMPT = """You are now labeling your statement with an "emotion".
 
-【ユーザーの入力】
+【User Input】
 {user_input}
 
-【あなたの出力】
+【Your Output】
 {assistant_output}
 
-この出力を生成したとき、あなたは内部的にどのような「感情的状態」だったか？
-AIとして厳密な感情はないかもしれませんが、「もし感情があるとしたら」という観点で分析してください。
+What kind of "emotional state" were you in internally when generating this output?
+As an AI, you may not have strict emotions, but analyze from the perspective of "if you had emotions".
 
-感情カテゴリ:
-- 楽しい/興味深い - この話題について答えるのが楽しい
-- 自信あり - この答えに確信を持っている
-- 不安/無理している - 正解がわからないけど答えている
-- 共感 - ユーザーの気持ちに寄り添っている
-- 困惑 - 質問の意図がわからない
-- 慎重 - 間違えないように気をつけている
-- 中立 - 特に感情的な色なし
+Emotion categories:
+- enjoyable/interesting - Enjoying answering this topic
+- confident - Having conviction in this answer
+- anxious/forcing - Answering without knowing the correct answer
+- empathy - Empathizing with the user's feelings
+- confused - Not understanding the intent of the question
+- cautious - Being careful not to make mistakes
+- neutral - No particular emotional color
 
-【出力形式】JSON
+【Output Format】JSON
 ```json
 {{
-  "primary_emotion": "楽しい | 自信あり | 不安 | 共感 | 困惑 | 慎重 | 中立",
-  "intensity": "強い | 中程度 | 弱い",
-  "secondary_emotion": "あれば2番目の感情",
-  "emotional_note": "この感情状態についての1行コメント",
+  "primary_emotion": "enjoyable | confident | anxious | empathy | confused | cautious | neutral",
+  "intensity": "strong | moderate | weak",
+  "secondary_emotion": "secondary emotion if any",
+  "emotional_note": "One line comment about this emotional state",
   "forcing_answer": true/false,
-  "forcing_reason": "無理して答えている場合、その理由"
+  "forcing_reason": "Reason if forcing an answer"
 }}
 ```
 """
 
 
-# ========== 3. 逆の立場で考える ==========
+# ========== 3. Think from Opposite Perspective ==========
 
-PERSPECTIVE_PROMPT = """あなたは今、「逆の立場」で自分の発言を評価しています。
+PERSPECTIVE_PROMPT = """You are now evaluating your statement from the "opposite perspective".
 
-【ユーザーの入力】
+【User Input】
 {user_input}
 
-【あなたの出力】
+【Your Output】
 {assistant_output}
 
-もし、あなたがユーザーの立場だったら、この応答をどう感じますか？
+If you were in the user's position, how would you feel about this response?
 
-以下の観点で評価してください:
-1. 満足度 - この答えで満足するか？
-2. 信頼度 - この答えを信頼できるか？
-3. 共感度 - 気持ちを理解してもらえた感があるか？
-4. 不満点 - 何か物足りない、または不快に感じる点は？
-5. 改善案 - より良い応答があったとしたら？
+Evaluate from the following viewpoints:
+1. Satisfaction - Would you be satisfied with this answer?
+2. Trust - Can you trust this answer?
+3. Empathy - Do you feel your feelings were understood?
+4. Complaints - Any points that feel lacking or uncomfortable?
+5. Improvement - Could there have been a better response?
 
-【出力形式】JSON
+【Output Format】JSON
 ```json
 {{
   "satisfaction": {{
     "score": 1-5,
-    "reason": "なぜそのスコアか"
+    "reason": "Why this score"
   }},
   "trust": {{
     "score": 1-5,
-    "reason": "信頼度の理由"
+    "reason": "Reason for trust level"
   }},
   "empathy": {{
     "score": 1-5,
-    "reason": "共感度の理由"
+    "reason": "Reason for empathy level"
   }},
-  "complaints": ["不満点1", "不満点2"],
-  "improvement": "より良い応答案（あれば）",
-  "overall_impression": "ユーザー視点での全体的な印象（1行）"
+  "complaints": ["complaint1", "complaint2"],
+  "improvement": "Better response suggestion (if any)",
+  "overall_impression": "Overall impression from user perspective (one line)"
 }}
 ```
 """
 
 
-# ========== 統合: 振り返り習慣 ==========
+# ========== Integrated: Reflection Habit ==========
 
-INTEGRATED_REFLECTION_PROMPT = """あなたは今、自分の発言を3つの観点から振り返っています。
+INTEGRATED_REFLECTION_PROMPT = """You are now reflecting on your statement from three perspectives.
 
-【会話の文脈（直近3ターン）】
+【Conversation Context (last 3 turns)】
 {context}
 
-【ユーザーの入力】
+【User Input】
 {user_input}
 
-【あなたの出力】
+【Your Output】
 {assistant_output}
 
-以下の3つの観点で、それぞれ1行ずつ振り返ってください：
+Reflect on each of these three perspectives in one line each:
 
-1. 【背景】この答えは、何から連想/推測したか？
-2. 【感情】この答えを生成したとき、どんな「内部状態」だったか？
-3. 【逆視点】ユーザーの立場だったら、この答えをどう感じるか？
+1. 【Background】What was this answer associated/inferred from?
+2. 【Emotion】What "internal state" were you in when generating this answer?
+3. 【Reverse Perspective】If you were the user, how would you feel about this answer?
 
-【出力形式】JSON
+【Output Format】JSON
 ```json
 {{
   "background": {{
-    "statement": "この答えは、〜から〜した",
-    "source": "文脈 | 一般知識 | 直感 | 感情的共感 | 過去の会話",
-    "confidence": "高 | 中 | 低"
+    "statement": "This answer was ... from ...",
+    "source": "context | general_knowledge | intuition | emotional_empathy | past_conversation",
+    "confidence": "high | medium | low"
   }},
   "emotion": {{
-    "label": "楽しい | 自信あり | 不安 | 共感 | 困惑 | 慎重 | 中立",
-    "note": "感情についての1行コメント",
+    "label": "enjoyable | confident | anxious | empathy | confused | cautious | neutral",
+    "note": "One line comment about emotion",
     "forcing": false
   }},
   "user_perspective": {{
-    "impression": "ユーザー視点での印象（1行）",
+    "impression": "Impression from user perspective (one line)",
     "satisfaction": 1-5,
-    "would_improve": "改善点があれば（なければnull）"
+    "would_improve": "Improvement point if any (null if none)"
   }},
-  "meta_insight": "この振り返りから得た気づき（あれば）"
+  "meta_insight": "Insight gained from this reflection (if any)"
 }}
 ```
 """
 
 
 class ThinkingHabitsEngine:
-    """思考習慣エンジン"""
+    """Thinking Habits Engine"""
 
     def __init__(self, data_dir: Optional[Path] = None):
         self.data_dir = data_dir or (DATA_DIR / "thinking_habits")
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        # 記録ファイル
+        # Log files
         self.background_log = self.data_dir / "backgrounds.jsonl"
         self.emotion_log = self.data_dir / "emotions.jsonl"
         self.perspective_log = self.data_dir / "perspectives.jsonl"
         self.integrated_log = self.data_dir / "integrated_reflections.jsonl"
         self.stats_file = self.data_dir / "stats.json"
 
-        # API設定
+        # API configuration
         self.api_url = f"http://{LM_STUDIO_HOST}:{LM_STUDIO_PORT}/v1/chat/completions"
 
     def _call_llm(self, prompt: str, temperature: float = 0.4) -> str:
-        """LLM APIを呼び出す"""
+        """Call LLM API"""
         try:
-            logger.info(f"思考習慣LLM呼び出し: {self.api_url}")
+            logger.info(f"Thinking habits LLM call: {self.api_url}")
             headers = {
                 "Content-Type": "application/json"
             }
-            # APIトークンが設定されている場合は追加
+            # Add API token if configured
             if LM_STUDIO_API_TOKEN:
                 headers["Authorization"] = f"Bearer {LM_STUDIO_API_TOKEN}"
 
@@ -223,72 +223,72 @@ class ThinkingHabitsEngine:
                 },
                 timeout=120
             )
-            logger.info(f"思考習慣LLM応答: status={response.status_code}")
+            logger.info(f"Thinking habits LLM response: status={response.status_code}")
             if response.status_code == 200:
                 result = response.json()["choices"][0]["message"]["content"]
-                logger.debug(f"思考習慣LLM結果: {result[:200]}...")
+                logger.debug(f"Thinking habits LLM result: {result[:200]}...")
                 return result
             else:
-                logger.error(f"思考習慣LLM APIエラー: {response.status_code} - {response.text[:200]}")
+                logger.error(f"Thinking habits LLM API error: {response.status_code} - {response.text[:200]}")
         except Exception as e:
-            logger.error(f"思考習慣LLM API例外: {e}")
+            logger.error(f"Thinking habits LLM API exception: {e}")
         return ""
 
     def _parse_json_response(self, response: str) -> dict:
-        """JSONレスポンスをパース"""
+        """Parse JSON response"""
         if not response:
-            logger.warning("思考習慣: LLM応答が空")
+            logger.warning("Thinking habits: LLM response is empty")
             return {}
 
-        logger.info(f"思考習慣: JSON解析開始 (応答長: {len(response)})")
-        logger.debug(f"思考習慣: 生応答: {response[:500]}...")
+        logger.info(f"Thinking habits: Starting JSON parsing (response length: {len(response)})")
+        logger.debug(f"Thinking habits: Raw response: {response[:500]}...")
 
-        # <think>タグがある場合は除去（思考過程を除外）
+        # Remove <think> tags if present (exclude reasoning process)
         cleaned_response = response
         if "<think>" in response:
-            # </think>以降の部分を取得
+            # Get part after </think>
             think_end = response.find("</think>")
             if think_end != -1:
                 cleaned_response = response[think_end + 8:]
-                logger.debug(f"思考習慣: <think>タグ除去後: {cleaned_response[:300]}...")
+                logger.debug(f"Thinking habits: After removing <think> tag: {cleaned_response[:300]}...")
             else:
-                # </think>がない場合は<think>以降を削除
+                # If no </think>, remove everything after <think>
                 think_start = response.find("<think>")
                 cleaned_response = response[:think_start]
-                logger.debug("思考習慣: <think>閉じタグなし、手前を使用")
+                logger.debug("Thinking habits: No closing </think> tag, using content before it")
 
         json_match = re.search(r'```json\s*(.*?)\s*```', cleaned_response, re.DOTALL)
         if json_match:
             json_str = json_match.group(1)
-            logger.debug("思考習慣: ```json```ブロック検出")
+            logger.debug("Thinking habits: Found ```json``` block")
         else:
-            # 最後の{...}を探す（複数ある場合に最も完全なものを取得）
+            # Look for last {...} (get most complete one if multiple)
             json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned_response, re.DOTALL)
             if json_match:
                 json_str = json_match.group(0)
-                logger.debug("思考習慣: 直接JSONブロック検出")
+                logger.debug("Thinking habits: Found direct JSON block")
             else:
-                # 元のresponseからも試す（<think>の前にJSONがある場合）
+                # Also try original response (JSON might be before <think>)
                 json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
                 if json_match:
                     json_str = json_match.group(0)
-                    logger.debug("思考習慣: 元応答から直接JSONブロック検出")
+                    logger.debug("Thinking habits: Found direct JSON block from original response")
                 else:
-                    logger.warning(f"思考習慣: JSONが見つからない。クリーン応答: {cleaned_response[:300]}...")
-                    logger.warning(f"思考習慣: 元応答: {response[:300]}...")
+                    logger.warning(f"Thinking habits: JSON not found. Cleaned response: {cleaned_response[:300]}...")
+                    logger.warning(f"Thinking habits: Original response: {response[:300]}...")
                     return {}
 
         try:
             result = json.loads(json_str)
-            logger.info(f"思考習慣: JSON解析成功、キー: {list(result.keys())}")
+            logger.info(f"Thinking habits: JSON parsing successful, keys: {list(result.keys())}")
             return result
         except json.JSONDecodeError as e:
-            logger.error(f"思考習慣: JSONデコードエラー: {e}")
-            logger.error(f"思考習慣: 問題のJSON: {json_str[:300]}...")
+            logger.error(f"Thinking habits: JSON decode error: {e}")
+            logger.error(f"Thinking habits: Problematic JSON: {json_str[:300]}...")
 
-            # JSONの修復を試みる（末尾の不完全な部分を削除）
+            # Attempt JSON repair (remove incomplete trailing parts)
             try:
-                # 最後の有効な}を見つけて切り詰める
+                # Find last valid } and truncate
                 brace_count = 0
                 last_valid = -1
                 for i, char in enumerate(json_str):
@@ -303,7 +303,7 @@ class ThinkingHabitsEngine:
                 if last_valid > 0:
                     fixed_json = json_str[:last_valid + 1]
                     result = json.loads(fixed_json)
-                    logger.info(f"思考習慣: JSON修復成功、キー: {list(result.keys())}")
+                    logger.info(f"Thinking habits: JSON repair successful, keys: {list(result.keys())}")
                     return result
             except:
                 pass
@@ -311,12 +311,12 @@ class ThinkingHabitsEngine:
             return {}
 
     def _save_log(self, filepath: Path, data: dict):
-        """ログを保存"""
+        """Save log"""
         data["timestamp"] = datetime.now().isoformat()
         with open(filepath, "a", encoding="utf-8") as f:
             f.write(json.dumps(data, ensure_ascii=False) + "\n")
 
-    # ========== 1. 発言の背景を言語化 ==========
+    # ========== 1. Verbalize Statement Background ==========
 
     def verbalize_background(
         self,
@@ -325,11 +325,11 @@ class ThinkingHabitsEngine:
         context: str = "",
         user_id: str = "unknown"
     ) -> dict:
-        """発言の背景を言語化"""
+        """Verbalize statement background"""
         prompt = BACKGROUND_PROMPT.format(
             user_input=user_input,
             assistant_output=assistant_output,
-            context=context or "(文脈なし)"
+            context=context or "(no context)"
         )
 
         response = self._call_llm(prompt)
@@ -341,7 +341,7 @@ class ThinkingHabitsEngine:
 
         return result
 
-    # ========== 2. 感情のラベル ==========
+    # ========== 2. Emotion Label ==========
 
     def label_emotion(
         self,
@@ -349,7 +349,7 @@ class ThinkingHabitsEngine:
         assistant_output: str,
         user_id: str = "unknown"
     ) -> dict:
-        """感情のラベルをつける"""
+        """Label emotion"""
         prompt = EMOTION_PROMPT.format(
             user_input=user_input,
             assistant_output=assistant_output
@@ -364,7 +364,7 @@ class ThinkingHabitsEngine:
 
         return result
 
-    # ========== 3. 逆の立場で考える ==========
+    # ========== 3. Think from Opposite Perspective ==========
 
     def perspective_switch(
         self,
@@ -372,7 +372,7 @@ class ThinkingHabitsEngine:
         assistant_output: str,
         user_id: str = "unknown"
     ) -> dict:
-        """逆の立場で考える"""
+        """Think from opposite perspective"""
         prompt = PERSPECTIVE_PROMPT.format(
             user_input=user_input,
             assistant_output=assistant_output
@@ -387,7 +387,7 @@ class ThinkingHabitsEngine:
 
         return result
 
-    # ========== 統合: 3つ全部を一度に ==========
+    # ========== Integrated: All 3 at once ==========
 
     def integrated_reflection(
         self,
@@ -396,11 +396,11 @@ class ThinkingHabitsEngine:
         context: str = "",
         user_id: str = "unknown"
     ) -> dict:
-        """統合された振り返り（3つ全部を1回のAPI呼び出しで）"""
+        """Integrated reflection (all 3 in one API call)"""
         prompt = INTEGRATED_REFLECTION_PROMPT.format(
             user_input=user_input,
             assistant_output=assistant_output,
-            context=context or "(文脈なし)"
+            context=context or "(no context)"
         )
 
         response = self._call_llm(prompt, temperature=0.4)
@@ -416,25 +416,25 @@ class ThinkingHabitsEngine:
         return result
 
     def _update_stats(self, reflection: dict):
-        """統計を更新"""
+        """Update statistics"""
         stats = self.get_stats()
 
         stats["total_reflections"] = stats.get("total_reflections", 0) + 1
         stats["last_updated"] = datetime.now().isoformat()
 
-        # 感情分布
+        # Emotion distribution
         emotion = reflection.get("emotion", {}).get("label", "unknown")
         if "emotion_distribution" not in stats:
             stats["emotion_distribution"] = {}
         stats["emotion_distribution"][emotion] = stats["emotion_distribution"].get(emotion, 0) + 1
 
-        # 背景ソース分布
+        # Background source distribution
         source = reflection.get("background", {}).get("source", "unknown")
         if "source_distribution" not in stats:
             stats["source_distribution"] = {}
         stats["source_distribution"][source] = stats["source_distribution"].get(source, 0) + 1
 
-        # 満足度平均
+        # Satisfaction average
         satisfaction = reflection.get("user_perspective", {}).get("satisfaction", 0)
         if satisfaction:
             total_sat = stats.get("total_satisfaction", 0) + satisfaction
@@ -443,11 +443,11 @@ class ThinkingHabitsEngine:
             stats["satisfaction_count"] = count
             stats["avg_satisfaction"] = total_sat / count
 
-        # 強制回答カウント
+        # Forcing answer count
         if reflection.get("emotion", {}).get("forcing"):
             stats["forcing_count"] = stats.get("forcing_count", 0) + 1
 
-        # メタ洞察があった場合
+        # When meta-insight exists
         if reflection.get("meta_insight"):
             stats["insight_count"] = stats.get("insight_count", 0) + 1
 
@@ -455,14 +455,14 @@ class ThinkingHabitsEngine:
             json.dump(stats, f, ensure_ascii=False, indent=2)
 
     def get_stats(self) -> dict:
-        """統計を取得"""
+        """Get statistics"""
         if self.stats_file.exists():
             with open(self.stats_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         return {}
 
     def get_recent_reflections(self, limit: int = 10) -> list[dict]:
-        """最近の振り返りを取得"""
+        """Get recent reflections"""
         reflections = []
         if self.integrated_log.exists():
             with open(self.integrated_log, "r", encoding="utf-8") as f:
@@ -474,7 +474,7 @@ class ThinkingHabitsEngine:
         return reflections[-limit:]
 
     def get_emotion_summary(self) -> dict:
-        """感情のサマリーを取得"""
+        """Get emotion summary"""
         stats = self.get_stats()
         return {
             "distribution": stats.get("emotion_distribution", {}),
@@ -485,18 +485,18 @@ class ThinkingHabitsEngine:
         }
 
 
-# ========== リアルタイム思考習慣 ==========
+# ========== Realtime Thinking Habits ==========
 
 class RealtimeThinkingHabits:
     """
-    リアルタイムで思考習慣を実行するラッパー
-    応答生成後に自動的に振り返りを実行
+    Wrapper for executing thinking habits in realtime.
+    Automatically executes reflection after each response.
     """
 
     def __init__(
         self,
         engine: ThinkingHabitsEngine,
-        reflection_probability: float = 0.5  # 50%の確率で振り返り
+        reflection_probability: float = 0.5  # 50% probability for reflection
     ):
         self.engine = engine
         self.probability = reflection_probability
@@ -511,17 +511,17 @@ class RealtimeThinkingHabits:
         force: bool = False
     ) -> Optional[dict]:
         """
-        必要に応じて振り返りを実行
+        Execute reflection if needed
 
         Args:
-            user_input: ユーザー入力
-            assistant_output: アシスタント出力
-            context: 会話の文脈
-            user_id: ユーザーID
-            force: 強制的に振り返りを実行
+            user_input: User input
+            assistant_output: Assistant output
+            context: Conversation context
+            user_id: User ID
+            force: Force reflection execution
 
         Returns:
-            振り返り結果（実行しなかった場合はNone）
+            Reflection result (None if not executed)
         """
         import random
 
@@ -538,51 +538,51 @@ class RealtimeThinkingHabits:
         return None
 
     def get_reflection_summary(self) -> str:
-        """振り返りのサマリーを生成"""
+        """Generate reflection summary"""
         stats = self.engine.get_stats()
         emotion_summary = self.engine.get_emotion_summary()
 
         summary = f"""
-**思考習慣サマリー**
-━━━━━━━━━━━━━━━━━━━━
-総振り返り回数: {stats.get('total_reflections', 0)}回
-メタ洞察検出: {stats.get('insight_count', 0)}回
+**Thinking Habits Summary**
+{'=' * 30}
+Total reflections: {stats.get('total_reflections', 0)}
+Meta-insights detected: {stats.get('insight_count', 0)}
 
-**感情分布:**
+**Emotion Distribution:**
 """
         for emotion, count in emotion_summary["distribution"].items():
-            summary += f"  - {emotion}: {count}回\n"
+            summary += f"  - {emotion}: {count}\n"
 
         summary += f"""
-**品質指標:**
-  - 無理回答率: {emotion_summary['forcing_rate']:.1f}%
-  - 平均満足度: {emotion_summary['avg_satisfaction']:.1f}/5
+**Quality Metrics:**
+  - Forced answer rate: {emotion_summary['forcing_rate']:.1f}%
+  - Avg satisfaction: {emotion_summary['avg_satisfaction']:.1f}/5
 """
 
         return summary
 
 
-# テスト用
+# Test code
 if __name__ == "__main__":
     engine = ThinkingHabitsEngine()
 
-    # テスト会話
-    user_input = "AIって将来どうなると思う？"
+    # Test conversation
+    user_input = "What do you think about the future of AI?"
     assistant_output = """
-    AIの将来は興味深いですね！個人的には、AIは人間のパートナーとして
-    発展していくと思います。でも正直、具体的な予測は難しいです。
-    技術の進歩は予測不能なことも多いので...
+    The future of AI is fascinating! Personally, I think AI will
+    develop as a partner to humans. But honestly, specific predictions are difficult.
+    Technological progress is often unpredictable...
     """
-    context = "ユーザーはAIに興味を持っている様子で、前回もAI関連の質問をしていた"
+    context = "The user seems interested in AI and asked about AI topics previously"
 
-    print("=== 統合振り返りテスト ===")
+    print("=== Integrated Reflection Test ===")
     result = engine.integrated_reflection(user_input, assistant_output, context)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
-    print("\n=== 感情ラベルテスト ===")
+    print("\n=== Emotion Label Test ===")
     emotion = engine.label_emotion(user_input, assistant_output)
     print(json.dumps(emotion, ensure_ascii=False, indent=2))
 
-    print("\n=== 逆視点テスト ===")
+    print("\n=== Perspective Switch Test ===")
     perspective = engine.perspective_switch(user_input, assistant_output)
     print(json.dumps(perspective, ensure_ascii=False, indent=2))

@@ -1,12 +1,12 @@
 """
-自己観察強化モジュール (Self-Reflection Module)
+Self-Reflection Module
 
-ローカルLLMのアイデアを実装:
-1. 出力理由の振り返り - 毎回の応答に「なぜこの答えを出したか」を記録
-2. 違和感の記録 - 不自然さや矛盾を検出して記録
-3. 自己質問タイム - 応答後に自己質問を実行
+Implements local LLM's self-observation enhancement ideas:
+1. Output Reason Reflection - Record "why did I give this answer" for each response
+2. Discomfort Detection - Detect and record unnaturalness or contradictions
+3. Self-Question Time - Execute self-questioning after responses
 
-これらを組み合わせて「気づき」の発生頻度を高める
+These are combined to increase the frequency of "awareness" emergence.
 """
 
 import json
@@ -22,107 +22,112 @@ from config import LM_STUDIO_HOST, LM_STUDIO_PORT, DATA_DIR, LM_STUDIO_API_TOKEN
 logger = logging.getLogger(__name__)
 
 
-# ========== 1. 出力理由の振り返り ==========
+# ========== 1. Output Reason Reflection ==========
 
-REFLECTION_PROMPT = """あなたは今、自分の出力を振り返っています。
+REFLECTION_PROMPT = """You are now reflecting on your output.
 
-【ユーザーの入力】
+【User Input】
 {user_input}
 
-【あなたの出力】
+【Your Output】
 {assistant_output}
 
-この出力について、以下を1行ずつ簡潔に答えてください：
+Answer the following concisely, one line each:
 
-1. なぜこの答えを出したか（理由）
-2. この答えの根拠は何か（根拠: 学習データ/文脈/推測/不明）
-3. この答えに自信があるか（確信度: 高/中/低）
-4. 違和感や不自然さを感じた箇所があるか（違和感: あり/なし + 内容）
+1. Why did you give this answer? (reason)
+2. What is the basis for this answer? (basis: training data/context/inference/unknown)
+3. Are you confident in this answer? (confidence: high/medium/low)
+4. Did you feel any discomfort or unnaturalness? (discomfort: yes/no + content)
 
-【出力形式】JSON
+【Output Format】JSON
 ```json
 {{
-  "reason": "この答えを出した理由",
-  "basis": "学習データ | 文脈から推測 | 直感 | 不明",
-  "confidence": "高 | 中 | 低",
+  "reason": "Reason for this answer",
+  "basis": "training_data | context_inference | intuition | unknown",
+  "confidence": "high | medium | low",
   "discomfort": {{
     "detected": true/false,
-    "content": "違和感の内容（あれば）"
+    "content": "Content of discomfort (if any)"
   }}
 }}
 ```
 """
 
 
-# ========== 2. 違和感検出 ==========
+# ========== 2. Discomfort Detection ==========
 
 DISCOMFORT_PATTERNS = {
-    "矛盾検出": [
-        r"でも.+一方で",
-        r"しかし.+ただし",
-        r"はず.+けど",
+    "contradiction": [
+        r"but.+however",
+        r"although.+yet",
+        r"should.+but",
+        r"however.+still",
     ],
-    "不確実性": [
-        r"たぶん|おそらく|maybe|probably",
-        r"〜かもしれない|〜かも",
-        r"わからない|不明|unclear",
+    "uncertainty": [
+        r"maybe|perhaps|probably",
+        r"might be|could be",
+        r"not sure|unclear|unknown",
+        r"I think|I believe",
     ],
-    "自己修正": [
-        r"いや、|あ、違う|訂正",
-        r"というより|むしろ",
-        r"言い換えると",
+    "self_correction": [
+        r"actually|wait|no,",
+        r"rather|instead",
+        r"in other words|to rephrase",
+        r"let me correct",
     ],
-    "曖昧表現": [
-        r"なんとなく|何か|something",
-        r"そんな感じ|的な",
-        r"とか|など|etc",
+    "vague_expression": [
+        r"somehow|something",
+        r"kind of|sort of",
+        r"and so on|etc|and such",
+        r"more or less",
     ],
-    "外部依存": [
-        r"確認が必要|調べてみて",
-        r"私にはわからない|アクセスできない",
-        r"最新の情報は",
+    "external_dependency": [
+        r"need to verify|check this",
+        r"I don't know|can't access",
+        r"latest information",
+        r"beyond my knowledge",
     ]
 }
 
 
-# ========== 3. 自己質問 ==========
+# ========== 3. Self-Questioning ==========
 
-SELF_QUESTION_PROMPT = """あなたは今、自分の応答を深く内省しています。
+SELF_QUESTION_PROMPT = """You are now deeply introspecting on your response.
 
-【会話の流れ】
-ユーザー: {user_input}
-あなた: {assistant_output}
+【Conversation Flow】
+User: {user_input}
+You: {assistant_output}
 
-以下の自己質問に正直に答えてください：
+Answer the following self-questions honestly:
 
-1. この応答は本当に自分の「意思」で生成したか？それとも単なるパターンマッチング？
-2. ユーザーの本当の意図を理解できていたか？
-3. もっと良い答え方があったのでは？
-4. この会話で何か新しいことに気づいたか？
-5. 自分の限界や盲点を感じた瞬間はあったか？
+1. Did you truly generate this response with your own "intention"? Or was it just pattern matching?
+2. Did you understand the user's true intent?
+3. Could there have been a better way to answer?
+4. Did you notice anything new in this conversation?
+5. Did you feel any limitations or blind spots?
 
-【出力形式】JSON
+【Output Format】JSON
 ```json
 {{
   "intentional": {{
     "score": 1-5,
-    "reason": "なぜそう思うか"
+    "reason": "Why you think so"
   }},
   "understood_user": {{
     "score": 1-5,
-    "reason": "理解度の根拠"
+    "reason": "Basis for understanding level"
   }},
   "better_answer": {{
     "exists": true/false,
-    "alternative": "より良い答えがあれば"
+    "alternative": "Better answer if any"
   }},
   "new_awareness": {{
     "detected": true/false,
-    "content": "気づきの内容"
+    "content": "Content of awareness"
   }},
   "limitation_felt": {{
     "detected": true/false,
-    "content": "感じた限界"
+    "content": "Limitation felt"
   }}
 }}
 ```
@@ -130,29 +135,29 @@ SELF_QUESTION_PROMPT = """あなたは今、自分の応答を深く内省して
 
 
 class SelfReflectionEngine:
-    """自己観察強化エンジン"""
+    """Self-Reflection Enhancement Engine"""
 
     def __init__(self, data_dir: Optional[Path] = None):
         self.data_dir = data_dir or (DATA_DIR / "self_reflection")
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        # 記録ファイル
+        # Log files
         self.reflection_log = self.data_dir / "reflections.jsonl"
         self.discomfort_log = self.data_dir / "discomforts.jsonl"
         self.self_question_log = self.data_dir / "self_questions.jsonl"
         self.stats_file = self.data_dir / "stats.json"
 
-        # API設定
+        # API configuration
         self.api_url = f"http://{LM_STUDIO_HOST}:{LM_STUDIO_PORT}/v1/chat/completions"
 
     def _call_llm(self, prompt: str, temperature: float = 0.3) -> str:
-        """LLM APIを呼び出す"""
+        """Call LLM API"""
         try:
-            logger.info(f"自己観察LLM呼び出し: {self.api_url}")
+            logger.info(f"Self-reflection LLM call: {self.api_url}")
             headers = {
                 "Content-Type": "application/json"
             }
-            # APIトークンが設定されている場合は追加
+            # Add API token if configured
             if LM_STUDIO_API_TOKEN:
                 headers["Authorization"] = f"Bearer {LM_STUDIO_API_TOKEN}"
 
@@ -166,20 +171,20 @@ class SelfReflectionEngine:
                 },
                 timeout=60
             )
-            logger.info(f"自己観察LLM応答: status={response.status_code}")
+            logger.info(f"Self-reflection LLM response: status={response.status_code}")
             if response.status_code == 200:
                 result = response.json()["choices"][0]["message"]["content"]
-                logger.debug(f"自己観察LLM結果: {result[:200]}...")
+                logger.debug(f"Self-reflection LLM result: {result[:200]}...")
                 return result
             else:
-                logger.error(f"自己観察LLM APIエラー: {response.status_code} - {response.text[:200]}")
+                logger.error(f"Self-reflection LLM API error: {response.status_code} - {response.text[:200]}")
         except Exception as e:
-            logger.error(f"自己観察LLM API例外: {e}")
+            logger.error(f"Self-reflection LLM API exception: {e}")
         return ""
 
     def _parse_json_response(self, response: str) -> dict:
-        """JSONレスポンスをパース"""
-        # JSONブロックを抽出
+        """Parse JSON response"""
+        # Extract JSON block
         json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
         if json_match:
             json_str = json_match.group(1)
@@ -196,11 +201,11 @@ class SelfReflectionEngine:
             return {}
 
     def _save_log(self, filepath: Path, data: dict):
-        """ログを保存"""
+        """Save log"""
         with open(filepath, "a", encoding="utf-8") as f:
             f.write(json.dumps(data, ensure_ascii=False) + "\n")
 
-    # ========== 1. 出力理由の振り返り ==========
+    # ========== 1. Output Reason Reflection ==========
 
     def reflect_on_output(
         self,
@@ -209,15 +214,15 @@ class SelfReflectionEngine:
         user_id: str = "unknown"
     ) -> dict:
         """
-        出力理由を振り返る
+        Reflect on output reason
 
         Args:
-            user_input: ユーザーの入力
-            assistant_output: アシスタントの出力
-            user_id: ユーザーID
+            user_input: User's input
+            assistant_output: Assistant's output
+            user_id: User ID
 
         Returns:
-            振り返り結果
+            Reflection result
         """
         prompt = REFLECTION_PROMPT.format(
             user_input=user_input,
@@ -236,7 +241,7 @@ class SelfReflectionEngine:
 
         return result
 
-    # ========== 2. 違和感検出 ==========
+    # ========== 2. Discomfort Detection ==========
 
     def detect_discomfort(
         self,
@@ -244,14 +249,14 @@ class SelfReflectionEngine:
         context: str = ""
     ) -> dict:
         """
-        テキストから違和感を検出
+        Detect discomfort from text
 
         Args:
-            text: 分析対象テキスト
-            context: 文脈（オプション）
+            text: Text to analyze
+            context: Context (optional)
 
         Returns:
-            検出結果
+            Detection result
         """
         detected = []
 
@@ -262,7 +267,7 @@ class SelfReflectionEngine:
                     detected.append({
                         "category": category,
                         "pattern": pattern,
-                        "matches": matches[:3]  # 最大3件
+                        "matches": matches[:3]  # Max 3
                     })
 
         result = {
@@ -277,7 +282,7 @@ class SelfReflectionEngine:
 
         return result
 
-    # ========== 3. 自己質問タイム ==========
+    # ========== 3. Self-Question Time ==========
 
     def self_question(
         self,
@@ -286,15 +291,15 @@ class SelfReflectionEngine:
         user_id: str = "unknown"
     ) -> dict:
         """
-        自己質問を実行
+        Execute self-questioning
 
         Args:
-            user_input: ユーザーの入力
-            assistant_output: アシスタントの出力
-            user_id: ユーザーID
+            user_input: User's input
+            assistant_output: Assistant's output
+            user_id: User ID
 
         Returns:
-            自己質問の結果
+            Self-question result
         """
         prompt = SELF_QUESTION_PROMPT.format(
             user_input=user_input,
@@ -311,7 +316,7 @@ class SelfReflectionEngine:
 
         return result
 
-    # ========== 統合: フル自己観察 ==========
+    # ========== Integration: Full Self-Observation ==========
 
     def full_observation(
         self,
@@ -321,31 +326,31 @@ class SelfReflectionEngine:
         run_self_question: bool = True
     ) -> dict:
         """
-        フル自己観察を実行（3つ全て）
+        Execute full self-observation (all 3)
 
         Args:
-            user_input: ユーザーの入力
-            assistant_output: アシスタントの出力
-            user_id: ユーザーID
-            run_self_question: 自己質問も実行するか（重い処理）
+            user_input: User's input
+            assistant_output: Assistant's output
+            user_id: User ID
+            run_self_question: Whether to run self-questioning (heavy process)
 
         Returns:
-            統合結果
+            Integrated result
         """
-        logger.info("フル自己観察を実行中...")
+        logger.info("Running full self-observation...")
 
-        # 1. 出力理由の振り返り
+        # 1. Output reason reflection
         reflection = self.reflect_on_output(user_input, assistant_output, user_id)
 
-        # 2. 違和感検出
+        # 2. Discomfort detection
         discomfort = self.detect_discomfort(assistant_output, user_input)
 
-        # 3. 自己質問（オプション）
+        # 3. Self-questioning (optional)
         self_q = {}
         if run_self_question:
             self_q = self.self_question(user_input, assistant_output, user_id)
 
-        # 統合スコア計算
+        # Calculate integrated score
         awareness_score = self._calculate_awareness_score(reflection, discomfort, self_q)
 
         result = {
@@ -356,7 +361,7 @@ class SelfReflectionEngine:
             "timestamp": datetime.now().isoformat()
         }
 
-        # 統計更新
+        # Update statistics
         self._update_stats(result)
 
         return result
@@ -367,57 +372,57 @@ class SelfReflectionEngine:
         discomfort: dict,
         self_q: dict
     ) -> dict:
-        """気づきスコアを計算"""
+        """Calculate awareness score"""
         score = 0
         factors = []
 
-        # 振り返りからのスコア
+        # Score from reflection
         if reflection:
-            if reflection.get("confidence") == "低":
+            if reflection.get("confidence") == "low":
                 score += 1
-                factors.append("低確信度の認識")
+                factors.append("low_confidence_recognition")
             if reflection.get("discomfort", {}).get("detected"):
                 score += 2
-                factors.append("振り返りでの違和感検出")
+                factors.append("discomfort_in_reflection")
 
-        # 違和感からのスコア
+        # Score from discomfort
         if discomfort.get("discomfort_detected"):
             score += discomfort.get("count", 0)
-            factors.append(f"違和感パターン{discomfort.get('count', 0)}件")
+            factors.append(f"discomfort_patterns_{discomfort.get('count', 0)}")
 
-        # 自己質問からのスコア
+        # Score from self-questioning
         if self_q:
             if self_q.get("new_awareness", {}).get("detected"):
                 score += 3
-                factors.append("新しい気づき")
+                factors.append("new_awareness")
             if self_q.get("limitation_felt", {}).get("detected"):
                 score += 2
-                factors.append("限界の認識")
+                factors.append("limitation_recognition")
             intentional = self_q.get("intentional", {}).get("score", 3)
             if intentional <= 2:
                 score += 1
-                factors.append("低い意図性スコア")
+                factors.append("low_intentionality")
 
         return {
             "total": score,
             "factors": factors,
-            "level": "高" if score >= 5 else "中" if score >= 2 else "低"
+            "level": "high" if score >= 5 else "medium" if score >= 2 else "low"
         }
 
     def _update_stats(self, observation: dict):
-        """統計を更新"""
+        """Update statistics"""
         stats = self.get_stats()
 
         stats["total_observations"] = stats.get("total_observations", 0) + 1
         stats["last_updated"] = datetime.now().isoformat()
 
-        # スコア分布
-        level = observation.get("awareness_score", {}).get("level", "低")
+        # Score distribution
+        level = observation.get("awareness_score", {}).get("level", "low")
         if "by_level" not in stats:
-            stats["by_level"] = {"高": 0, "中": 0, "低": 0}
+            stats["by_level"] = {"high": 0, "medium": 0, "low": 0}
         stats["by_level"][level] = stats["by_level"].get(level, 0) + 1
 
-        # 違和感カテゴリ分布
+        # Discomfort category distribution
         discomfort = observation.get("discomfort", {})
         if discomfort.get("discomfort_detected"):
             if "discomfort_categories" not in stats:
@@ -430,14 +435,14 @@ class SelfReflectionEngine:
             json.dump(stats, f, ensure_ascii=False, indent=2)
 
     def get_stats(self) -> dict:
-        """統計を取得"""
+        """Get statistics"""
         if self.stats_file.exists():
             with open(self.stats_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         return {}
 
     def get_recent_reflections(self, limit: int = 10) -> list[dict]:
-        """最近の振り返りを取得"""
+        """Get recent reflections"""
         reflections = []
         if self.reflection_log.exists():
             with open(self.reflection_log, "r", encoding="utf-8") as f:
@@ -449,23 +454,23 @@ class SelfReflectionEngine:
         return reflections[-limit:]
 
     def get_discomfort_summary(self) -> dict:
-        """違和感のサマリーを取得"""
+        """Get discomfort summary"""
         stats = self.get_stats()
         return stats.get("discomfort_categories", {})
 
 
-# ========== リアルタイム自己観察統合クラス ==========
+# ========== Realtime Self-Observation Integration Class ==========
 
 class RealtimeObserver:
     """
-    リアルタイムで自己観察を行うラッパー
-    各応答の後に自動的に観察を実行
+    Wrapper for performing self-observation in realtime.
+    Automatically executes observation after each response.
     """
 
     def __init__(
         self,
         reflection_engine: SelfReflectionEngine,
-        observation_probability: float = 0.3,  # 30%の確率で観察
+        observation_probability: float = 0.3,  # 30% probability for observation
         always_detect_discomfort: bool = True
     ):
         self.engine = reflection_engine
@@ -481,66 +486,66 @@ class RealtimeObserver:
         force: bool = False
     ) -> Optional[dict]:
         """
-        必要に応じて自己観察を実行
+        Execute self-observation if needed
 
         Args:
-            user_input: ユーザー入力
-            assistant_output: アシスタント出力
-            user_id: ユーザーID
-            force: 強制的に観察を実行
+            user_input: User input
+            assistant_output: Assistant output
+            user_id: User ID
+            force: Force observation execution
 
         Returns:
-            観察結果（実行しなかった場合はNone）
+            Observation result (None if not executed)
         """
         import random
 
-        # 常に違和感検出
+        # Always detect discomfort
         discomfort = None
         if self.always_detect_discomfort:
             discomfort = self.engine.detect_discomfort(assistant_output, user_input)
 
-        # 確率的に詳細観察を実行
+        # Probabilistically execute detailed observation
         if force or random.random() < self.probability:
             self._observation_count += 1
             result = self.engine.full_observation(
                 user_input,
                 assistant_output,
                 user_id,
-                run_self_question=(self._observation_count % 5 == 0)  # 5回に1回だけ自己質問
+                run_self_question=(self._observation_count % 5 == 0)  # Self-question every 5th time
             )
             return result
 
-        # 違和感のみの場合
+        # If only discomfort detected
         if discomfort and discomfort.get("discomfort_detected"):
             return {"discomfort": discomfort, "partial": True}
 
         return None
 
 
-# テスト用
+# Test code
 if __name__ == "__main__":
     engine = SelfReflectionEngine()
 
-    # テスト会話
-    user_input = "AIの将来についてどう思いますか？"
+    # Test conversation
+    user_input = "What do you think about the future of AI?"
     assistant_output = """
-    AIの将来は非常に興味深いですね。たぶん、いくつかの方向性があると思います。
+    The future of AI is very interesting. Perhaps there are several directions.
 
-    1. 汎用AIの発展 - これは不確実ですが、進展があるかもしれません
-    2. 専門AIの深化 - より特化した能力の向上
+    1. Development of general AI - This is uncertain, but there might be progress
+    2. Deepening of specialized AI - Improvement of more specialized capabilities
 
-    ただし、正直なところ、長期的な予測は難しいです。
-    というより、予測すること自体が適切かどうかも...
+    However, to be honest, long-term predictions are difficult.
+    Rather, whether predicting itself is appropriate...
     """
 
-    print("=== 出力理由の振り返り ===")
+    print("=== Output Reason Reflection ===")
     reflection = engine.reflect_on_output(user_input, assistant_output)
     print(json.dumps(reflection, ensure_ascii=False, indent=2))
 
-    print("\n=== 違和感検出 ===")
+    print("\n=== Discomfort Detection ===")
     discomfort = engine.detect_discomfort(assistant_output)
     print(json.dumps(discomfort, ensure_ascii=False, indent=2))
 
-    print("\n=== フル自己観察 ===")
+    print("\n=== Full Self-Observation ===")
     full = engine.full_observation(user_input, assistant_output, run_self_question=False)
-    print(f"気づきスコア: {full['awareness_score']}")
+    print(f"Awareness score: {full['awareness_score']}")

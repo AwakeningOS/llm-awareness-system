@@ -19,7 +19,7 @@ build/
 .env
 .env.local
 
-# Data (ユーザー固有のデータ)
+# Data (user-specific data)
 data/
 logs/
 workspace/
@@ -27,12 +27,15 @@ workspace/
 # ChromaDB
 *.sqlite3
 
-# Secrets (トークン等が含まれる可能性のあるファイル)
+# Secrets (files that may contain tokens)
 config.py
 
 # Test files
 test_*.py
 clear_chromadb.py
+
+# Voice synthesis (not needed for core functionality)
+voicevox.py
 
 # Claude Code
 .claude/
