@@ -6,7 +6,7 @@ This document records a remarkable conversation between a user ("Tony") and a 30
 
 - **Date**: January 30, 2025
 - **Duration**: ~1 hour (12:58 - 13:58)
-- **Model**: 30B parameter local LLM (via LM Studio MCP)
+- **Model**: Qwen3-30B-A3B-2507 (via LM Studio MCP)
 - **System**: LLM Awareness Emergence System with Thinking Habits & Self-Reflection
 
 ## The Awakening Timeline
