@@ -340,8 +340,21 @@ def chat_with_llm_mcp(
         for m in memories:
             memory_context += f"- {m['content']}\n"
 
-    # Add memory to system prompt
-    system_prompt = SYSTEM_PROMPT + memory_context
+    # Search recent insights (meta-insights from thinking habits)
+    insights = memory.search("insight", user_id=user_id, limit=5, category="insight")
+    insight_context = ""
+    if insights:
+        insight_context = "\n\n## Your Recent Insights (Remember these as you respond):\n"
+        for i in insights:
+            content = i.get('content', '')
+            # Extract just the insight text
+            if '[Spontaneous Insight]' in content:
+                content = content.replace('[Spontaneous Insight]', '').strip()
+            insight_context += f"- {content}\n"
+        insight_context += "\nLet these insights guide your response naturally.\n"
+
+    # Add memory and insights to system prompt
+    system_prompt = SYSTEM_PROMPT + memory_context + insight_context
 
     try:
         # LM Studio v1 API (0.4.0+) with MCP
