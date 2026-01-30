@@ -91,9 +91,16 @@ class MemorySystem:
         Returns:
             List of search results
         """
-        where_filter = {"user_id": user_id}
+        # Build where filter (ChromaDB requires $and for multiple conditions)
         if category:
-            where_filter["category"] = category
+            where_filter = {
+                "$and": [
+                    {"user_id": user_id},
+                    {"category": category}
+                ]
+            }
+        else:
+            where_filter = {"user_id": user_id}
 
         results = self.collection.query(
             query_texts=[query],
