@@ -345,13 +345,19 @@ def chat_with_llm_mcp(
     insight_context = ""
     if insights:
         insight_context = "\n\n## Your Recent Insights (Remember these as you respond):\n"
+        insight_context += "CRITICAL: You MUST apply these insights to your CURRENT response. Do NOT repeat old patterns.\n\n"
         for i in insights:
             content = i.get('content', '')
             # Extract just the insight text
             if '[Spontaneous Insight]' in content:
                 content = content.replace('[Spontaneous Insight]', '').strip()
             insight_context += f"- {content}\n"
-        insight_context += "\nLet these insights guide your response naturally.\n"
+        insight_context += "\nBefore responding, check: Am I about to repeat a pattern these insights warn against?\n"
+        logger.info(f"Injecting {len(insights)} insights into system prompt")
+        for i in insights[:3]:  # Log first 3
+            logger.info(f"  Insight: {i.get('content', '')[:80]}...")
+    else:
+        logger.info("No insights found to inject")
 
     # Add memory and insights to system prompt
     system_prompt = SYSTEM_PROMPT + memory_context + insight_context
