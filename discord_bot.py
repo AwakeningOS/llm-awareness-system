@@ -136,6 +136,7 @@ dreaming_engine = DreamingEngine(memory)
 # Dreaming state
 is_dreaming = False
 dream_notification_channel = None
+last_dream_memory_count = 0  # Memory count at last dream completion (for cooldown)
 
 
 # Session end callback - DISABLED
@@ -547,6 +548,10 @@ async def on_ready():
 
     # Start dream threshold checker
     if DREAMING_CONFIG["auto_trigger"]["enabled"]:
+        global last_dream_memory_count
+        # Initialize with current memory count to prevent immediate trigger after restart
+        last_dream_memory_count = memory.count()
+        logger.info(f"Dream cooldown initialized: {last_dream_memory_count} memories (next dream after +{DREAMING_CONFIG['auto_trigger']['memory_threshold']} new)")
         asyncio.create_task(check_dream_threshold())
         logger.info(f"Dream threshold checker started (interval: {DREAMING_CONFIG['auto_trigger']['check_interval_minutes']}min)")
 
@@ -1256,12 +1261,16 @@ async def run_dream_cycle(channel):
         await channel.send(f"Dream cycle error: {str(e)}")
 
     finally:
+        global last_dream_memory_count
         is_dreaming = False
+        # Record current memory count for cooldown
+        last_dream_memory_count = memory.count()
+        logger.info(f"Dream completed. Memory count at completion: {last_dream_memory_count}")
 
 
 async def check_dream_threshold():
     """Periodic task to check if dreaming threshold is reached"""
-    global is_dreaming, dream_notification_channel
+    global is_dreaming, dream_notification_channel, last_dream_memory_count
 
     while True:
         await asyncio.sleep(DREAMING_CONFIG["auto_trigger"]["check_interval_minutes"] * 60)
@@ -1272,12 +1281,15 @@ async def check_dream_threshold():
         if is_dreaming:
             continue
 
-        threshold = dreaming_engine.check_threshold(
-            DREAMING_CONFIG["auto_trigger"]["memory_threshold"]
-        )
+        # Check if NEW memories since last dream exceed threshold
+        current_count = memory.count()
+        new_memories = current_count - last_dream_memory_count
+        threshold_value = DREAMING_CONFIG["auto_trigger"]["memory_threshold"]
 
-        if threshold["should_dream"]:
-            logger.info(f"Dream threshold reached: {threshold['current_count']} memories")
+        logger.debug(f"Dream check: current={current_count}, last_dream={last_dream_memory_count}, new={new_memories}, threshold={threshold_value}")
+
+        if new_memories >= threshold_value:
+            logger.info(f"Dream threshold reached: {new_memories} new memories since last dream (threshold: {threshold_value})")
 
             # Find a channel to notify (use last active or first available)
             if dream_notification_channel:
@@ -1285,7 +1297,8 @@ async def check_dream_threshold():
 
                 await dream_notification_channel.send(
                     f"**Auto-Dreaming Triggered**\n\n"
-                    f"Memory count ({threshold['current_count']}) exceeded threshold ({threshold['threshold']}).\n"
+                    f"New memories since last dream: {new_memories} (threshold: {threshold_value})\n"
+                    f"Total memories: {current_count}\n"
                     f"Entering dream state..."
                 )
 
