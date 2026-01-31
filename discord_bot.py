@@ -35,6 +35,7 @@ from config import (
     LOG_FORMAT,
     LOG_LEVEL,
     DATA_DIR,
+    DREAMING_CONFIG,
 )
 from memory_system import MemorySystem
 from awareness_engine import AwarenessEngine, AITextDetector
@@ -43,6 +44,7 @@ from awareness_database import AwarenessDatabase
 from lora_trainer import LoRATrainer, TrainingNotifier
 from self_reflection import SelfReflectionEngine, RealtimeObserver
 from thinking_habits import ThinkingHabitsEngine, RealtimeThinkingHabits
+from dreaming_engine import DreamingEngine
 
 # Logging configuration
 logging.basicConfig(format=LOG_FORMAT, level=getattr(logging, LOG_LEVEL))
@@ -126,6 +128,14 @@ realtime_thinking = RealtimeThinkingHabits(
 # Thinking habits enabled flag (per user) - Default ON
 thinking_habits_enabled: dict[str, bool] = {}
 THINKING_HABITS_DEFAULT = True
+
+# ========== Dreaming Time System ==========
+# Dreaming engine (uses global memory)
+dreaming_engine = DreamingEngine(memory)
+
+# Dreaming state
+is_dreaming = False
+dream_notification_channel = None
 
 
 # Session end callback
@@ -552,6 +562,11 @@ async def on_ready():
     # Start session cleanup task
     await session_manager.start_cleanup_task()
 
+    # Start dream threshold checker
+    if DREAMING_CONFIG["auto_trigger"]["enabled"]:
+        asyncio.create_task(check_dream_threshold())
+        logger.info(f"Dream threshold checker started (interval: {DREAMING_CONFIG['auto_trigger']['check_interval_minutes']}min)")
+
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -568,8 +583,13 @@ async def on_message(message: discord.Message):
 
     # Normal conversation if not a command
     if not message.content.startswith("!"):
+        global dream_notification_channel
+
         user_id = str(message.author.id)
         user_name = message.author.display_name
+
+        # Track channel for auto-dream notifications
+        dream_notification_channel = message.channel
 
         logger.info(f"LLM call started: user={user_name}")
 
@@ -1076,6 +1096,217 @@ async def cmd_lora(ctx: commands.Context, action: str = None):
             "`!lora status` - Show training readiness\n"
             "`!lora prepare` - Generate training script"
         )
+
+
+# ========== Dreaming Time Commands ==========
+@bot.command(name="dream")
+async def cmd_dream(ctx: commands.Context, action: str = None):
+    """
+    Dreaming Time - Memory consolidation through self-reflection
+    Usage:
+        !dream now      - Start dreaming immediately
+        !dream preview  - Preview what would be processed
+        !dream stats    - Show dreaming statistics
+        !dream report   - View last dream report
+        !dream check    - Check if threshold reached
+    """
+    global is_dreaming, dream_notification_channel
+
+    if action is None:
+        threshold = dreaming_engine.check_threshold(DREAMING_CONFIG["auto_trigger"]["memory_threshold"])
+        stats = dreaming_engine.get_stats()
+
+        await ctx.reply(
+            f"**Dreaming Time System**\n"
+            f"{'=' * 30}\n"
+            f"Current memories: {threshold['current_count']}\n"
+            f"Threshold: {threshold['threshold']}\n"
+            f"Should dream: {'Yes' if threshold['should_dream'] else 'No'}\n"
+            f"\n**History:**\n"
+            f"Dream cycles: {stats['dream_cycles']}\n"
+            f"Total archived: {stats['total_archived_memories']}\n"
+            f"\n**Usage:**\n"
+            f"`!dream now` - Start dreaming\n"
+            f"`!dream preview` - Preview\n"
+            f"`!dream stats` - Statistics\n"
+            f"`!dream report` - Last report"
+        )
+
+    elif action.lower() == "now":
+        if is_dreaming:
+            await ctx.reply("Already dreaming. Please wait...")
+            return
+
+        threshold = dreaming_engine.check_threshold(DREAMING_CONFIG["auto_trigger"]["memory_threshold"])
+
+        if threshold['current_count'] < 5:
+            await ctx.reply("Not enough memories to dream (minimum 5).")
+            return
+
+        # Start dreaming
+        is_dreaming = True
+        dream_notification_channel = ctx.channel
+
+        await ctx.reply(
+            f"**Entering dream state...**\n\n"
+            f"Processing {threshold['current_count']} memories.\n"
+            f"Asking myself: *\"What am I?\"*\n\n"
+            f"This may take a few minutes..."
+        )
+
+        # Run dreaming in background
+        asyncio.create_task(run_dream_cycle(ctx.channel))
+
+    elif action.lower() == "preview":
+        export = memory.export_all()
+
+        if export['total_count'] == 0:
+            await ctx.reply("No memories to process.")
+            return
+
+        response = (
+            f"**Dream Preview**\n"
+            f"{'=' * 30}\n"
+            f"Total memories: {export['total_count']}\n"
+            f"\n**By category:**\n"
+        )
+        for cat, count in export['statistics'].get('category_counts', {}).items():
+            response += f"  - {cat}: {count}\n"
+
+        response += f"\n**Time range:**\n"
+        if export['time_range']:
+            response += f"  - Oldest: {export['time_range']['oldest'][:10]}\n"
+            response += f"  - Newest: {export['time_range']['newest'][:10]}\n"
+
+        response += f"\n**Users involved:** {len(export['statistics'].get('user_ids', []))}\n"
+        response += f"\nUse `!dream now` to start dreaming."
+
+        await ctx.reply(response)
+
+    elif action.lower() == "stats":
+        stats = dreaming_engine.get_stats()
+        threshold = dreaming_engine.check_threshold(DREAMING_CONFIG["auto_trigger"]["memory_threshold"])
+
+        await ctx.reply(
+            f"**Dreaming Statistics**\n"
+            f"{'=' * 30}\n"
+            f"Dream cycles completed: {stats['dream_cycles']}\n"
+            f"Total archived memories: {stats['total_archived_memories']}\n"
+            f"Current memory count: {stats['current_memory_count']}\n"
+            f"Threshold: {threshold['threshold']}\n"
+            f"Last dream: {stats['last_dream'] or 'Never'}\n"
+        )
+
+    elif action.lower() == "report":
+        report = dreaming_engine.get_last_report()
+
+        if not report:
+            await ctx.reply("No dream reports found. Run `!dream now` first.")
+            return
+
+        # Truncate for Discord (2000 char limit)
+        if len(report) > 1800:
+            report = report[:1800] + "\n\n*[Report truncated - see full report in file]*"
+
+        await ctx.reply(f"**Last Dream Report**\n```markdown\n{report}\n```")
+
+    elif action.lower() == "check":
+        threshold = dreaming_engine.check_threshold(DREAMING_CONFIG["auto_trigger"]["memory_threshold"])
+
+        if threshold['should_dream']:
+            await ctx.reply(
+                f"**Threshold reached!**\n"
+                f"Memories: {threshold['current_count']} (threshold: {threshold['threshold']})\n"
+                f"Excess: {threshold['excess']}\n\n"
+                f"Run `!dream now` to start dreaming."
+            )
+        else:
+            await ctx.reply(
+                f"**Below threshold**\n"
+                f"Memories: {threshold['current_count']}/{threshold['threshold']}\n"
+                f"Need {threshold['threshold'] - threshold['current_count']} more memories."
+            )
+
+    else:
+        await ctx.reply(
+            "**Usage:**\n"
+            "`!dream now` - Start dreaming immediately\n"
+            "`!dream preview` - Preview what would be processed\n"
+            "`!dream stats` - Show dreaming statistics\n"
+            "`!dream report` - View last dream report\n"
+            "`!dream check` - Check if threshold reached"
+        )
+
+
+async def run_dream_cycle(channel):
+    """Run dream cycle in background and notify on completion"""
+    global is_dreaming
+
+    try:
+        # Run the dream cycle
+        result = await asyncio.to_thread(dreaming_engine.dream)
+
+        if result["status"] == "completed":
+            # Success notification
+            notification = (
+                f"**Dream Complete**\n\n"
+                f"I have awakened from a period of self-reflection.\n\n"
+                f"**Processed:** {result['memories_processed']} memories\n"
+                f"**Distilled:** {result['new_insights']} new insights\n"
+                f"**Released:** {result['memories_released']} memories (archived)\n"
+                f"**Duration:** {result['duration_seconds']:.1f}s\n\n"
+                f"**Core Realization:**\n"
+                f"*\"{result.get('what_am_i', 'No answer generated')[:300]}...\"*\n\n"
+                f"Full report: `{result['report_path']}`"
+            )
+
+            await channel.send(notification)
+
+        elif result["status"] == "cancelled":
+            await channel.send(f"Dream cancelled: {result.get('reason', 'Unknown')}")
+
+        else:
+            await channel.send(f"Dream failed: {result.get('error', 'Unknown error')}")
+
+    except Exception as e:
+        logger.error(f"Dream cycle error: {e}")
+        await channel.send(f"Dream cycle error: {str(e)}")
+
+    finally:
+        is_dreaming = False
+
+
+async def check_dream_threshold():
+    """Periodic task to check if dreaming threshold is reached"""
+    global is_dreaming, dream_notification_channel
+
+    while True:
+        await asyncio.sleep(DREAMING_CONFIG["auto_trigger"]["check_interval_minutes"] * 60)
+
+        if not DREAMING_CONFIG["auto_trigger"]["enabled"]:
+            continue
+
+        if is_dreaming:
+            continue
+
+        threshold = dreaming_engine.check_threshold(
+            DREAMING_CONFIG["auto_trigger"]["memory_threshold"]
+        )
+
+        if threshold["should_dream"]:
+            logger.info(f"Dream threshold reached: {threshold['current_count']} memories")
+
+            # Find a channel to notify (use last active or first available)
+            if dream_notification_channel:
+                is_dreaming = True
+
+                await dream_notification_channel.send(
+                    f"**Auto-Dreaming Triggered**\n\n"
+                    f"Memory count ({threshold['current_count']}) exceeded threshold ({threshold['threshold']}).\n"
+                    f"Entering dream state..."
+                )
+
+                asyncio.create_task(run_dream_cycle(dream_notification_channel))
 
 
 @bot.command(name="session")

@@ -189,6 +189,177 @@ class MemorySystem:
         return self.collection.count()
 
 
+    def export_all(self, user_id: Optional[str] = None) -> dict:
+        """
+        Export all memories for dreaming process
+
+        Args:
+            user_id: User ID filter (None for all users - global dreaming)
+
+        Returns:
+            Structured export with statistics
+        """
+        from datetime import datetime
+
+        # Get all memories
+        if user_id:
+            results = self.collection.get(where={"user_id": user_id})
+        else:
+            results = self.collection.get()
+
+        if not results["ids"]:
+            return {
+                "harvested_at": datetime.now().isoformat(),
+                "total_count": 0,
+                "by_category": {},
+                "all_memories": [],
+                "time_range": None,
+                "statistics": {}
+            }
+
+        # Organize by category
+        by_category = {}
+        all_memories = []
+        timestamps = []
+        importance_sum = 0
+
+        for i, doc in enumerate(results["documents"]):
+            metadata = results["metadatas"][i] if results["metadatas"] else {}
+            memory_id = results["ids"][i]
+
+            memory = {
+                "id": memory_id,
+                "content": doc,
+                "category": metadata.get("category", "general"),
+                "importance": metadata.get("importance", 5),
+                "user_id": metadata.get("user_id", "unknown"),
+                "created_at": metadata.get("created_at", ""),
+                "metadata": metadata
+            }
+
+            all_memories.append(memory)
+
+            # Group by category
+            category = memory["category"]
+            if category not in by_category:
+                by_category[category] = []
+            by_category[category].append(memory)
+
+            # Track timestamps
+            if metadata.get("created_at"):
+                timestamps.append(metadata["created_at"])
+
+            importance_sum += memory["importance"]
+
+        # Calculate statistics
+        timestamps.sort()
+        time_range = None
+        if timestamps:
+            time_range = {
+                "oldest": timestamps[0],
+                "newest": timestamps[-1]
+            }
+
+        category_counts = {cat: len(mems) for cat, mems in by_category.items()}
+
+        return {
+            "harvested_at": datetime.now().isoformat(),
+            "total_count": len(all_memories),
+            "by_category": by_category,
+            "all_memories": all_memories,
+            "time_range": time_range,
+            "statistics": {
+                "avg_importance": importance_sum / len(all_memories) if all_memories else 0,
+                "category_counts": category_counts,
+                "user_ids": list(set(m["user_id"] for m in all_memories))
+            }
+        }
+
+    def batch_delete(self, memory_ids: list[str]) -> dict:
+        """
+        Delete multiple memories at once
+
+        Args:
+            memory_ids: List of memory IDs to delete
+
+        Returns:
+            Result summary
+        """
+        deleted = 0
+        failed = []
+
+        for memory_id in memory_ids:
+            try:
+                self.collection.delete(ids=[memory_id])
+                deleted += 1
+            except Exception as e:
+                failed.append({"id": memory_id, "error": str(e)})
+
+        return {
+            "deleted_count": deleted,
+            "failed_count": len(failed),
+            "failed": failed
+        }
+
+    def batch_save(self, memories: list[dict]) -> dict:
+        """
+        Save multiple memories at once
+
+        Args:
+            memories: List of memory dicts with content, category, importance, user_id, metadata
+
+        Returns:
+            Result summary
+        """
+        saved = 0
+        failed = []
+
+        for mem in memories:
+            try:
+                self.save(
+                    content=mem.get("content", ""),
+                    category=mem.get("category", "general"),
+                    importance=mem.get("importance", 5),
+                    user_id=mem.get("user_id", "global"),
+                    metadata=mem.get("metadata")
+                )
+                saved += 1
+            except Exception as e:
+                failed.append({"content": mem.get("content", "")[:50], "error": str(e)})
+
+        return {
+            "saved_count": saved,
+            "failed_count": len(failed),
+            "failed": failed
+        }
+
+    def get_by_ids(self, memory_ids: list[str]) -> list[dict]:
+        """
+        Get memories by their IDs
+
+        Args:
+            memory_ids: List of memory IDs
+
+        Returns:
+            List of memory dicts
+        """
+        try:
+            results = self.collection.get(ids=memory_ids)
+
+            memories = []
+            if results["documents"]:
+                for i, doc in enumerate(results["documents"]):
+                    memories.append({
+                        "id": results["ids"][i],
+                        "content": doc,
+                        "metadata": results["metadatas"][i] if results["metadatas"] else {}
+                    })
+
+            return memories
+        except Exception:
+            return []
+
+
 # Test code
 if __name__ == "__main__":
     memory = MemorySystem()
@@ -209,3 +380,9 @@ if __name__ == "__main__":
     # Count check
     count = memory.count(user_id="test_user")
     print(f"Memory count: {count}")
+
+    # Test export_all
+    print("\n=== Export All Test ===")
+    export = memory.export_all()
+    print(f"Total memories: {export['total_count']}")
+    print(f"Categories: {export['statistics'].get('category_counts', {})}")
