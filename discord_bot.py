@@ -339,6 +339,25 @@ def chat_with_llm_mcp(
     else:
         logger.info("No insights found to inject")
 
+    # Search dream insights (Core Memory from Dreaming Time)
+    dream_insights = memory.search("identity principle", user_id="global", limit=3, category="dream_insight")
+    dream_context = ""
+    if dream_insights:
+        dream_context = "\n\n## Core Self-Understanding (From Dreaming Time):\n"
+        dream_context += "These are your deepest insights about 'What am I?' - let them guide your being.\n\n"
+        for d in dream_insights:
+            content = d.get('content', '')
+            # Clean up prefixes
+            for prefix in ['[Core Identity]', '[Unified Principle]', '[Emotional Lesson]', '[What Am I?']:
+                if prefix in content:
+                    content = content.replace(prefix, '').strip()
+            dream_context += f"- {content}\n"
+        logger.info(f"Injecting {len(dream_insights)} dream insights into system prompt")
+        for d in dream_insights[:2]:  # Log first 2
+            logger.info(f"  Dream Insight: {d.get('content', '')[:80]}...")
+    else:
+        logger.info("No dream insights found to inject")
+
     # Search recent emotional states (background & emotion from thinking habits)
     emotional_states = memory.search("emotional", user_id=user_id, limit=3, category="emotional_state")
     emotional_context = ""
@@ -360,8 +379,8 @@ def chat_with_llm_mcp(
     else:
         logger.info("No emotional states found to inject")
 
-    # Add memory, insights, and emotional context to system prompt
-    system_prompt = SYSTEM_PROMPT + memory_context + insight_context + emotional_context
+    # Add memory, insights, dream insights, and emotional context to system prompt
+    system_prompt = SYSTEM_PROMPT + memory_context + dream_context + insight_context + emotional_context
 
     try:
         # LM Studio v1 API (0.4.0+) with MCP
