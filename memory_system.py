@@ -173,21 +173,67 @@ class MemorySystem:
         except Exception:
             return False
 
-    def count(self, user_id: Optional[str] = None) -> int:
+    def count(self, user_id: Optional[str] = None, category: Optional[str] = None) -> int:
         """
         Get total memory count
 
         Args:
             user_id: User ID (None for all)
+            category: Category filter (None for all)
 
         Returns:
             Memory count
         """
-        if user_id:
+        if user_id and category:
+            results = self.collection.get(where={
+                "$and": [
+                    {"user_id": user_id},
+                    {"category": category}
+                ]
+            })
+            return len(results["ids"])
+        elif user_id:
             results = self.collection.get(where={"user_id": user_id})
+            return len(results["ids"])
+        elif category:
+            results = self.collection.get(where={"category": category})
             return len(results["ids"])
         return self.collection.count()
 
+    def save_dialogue(
+        self,
+        user_message: str,
+        assistant_message: str,
+        user_id: str = "global",
+        user_name: str = "unknown"
+    ) -> str:
+        """
+        Save dialogue exchange immediately to ChromaDB
+
+        Args:
+            user_message: User's message
+            assistant_message: Assistant's response
+            user_id: User ID
+            user_name: User's display name
+
+        Returns:
+            ID of saved dialogue
+        """
+        # Format dialogue as single content
+        content = f"[User: {user_name}] {user_message}\n[Assistant] {assistant_message}"
+
+        return self.save(
+            content=content,
+            category="dialogue",
+            importance=3,  # Dialogue has medium importance
+            user_id="global",  # Always global for unified memory
+            metadata={
+                "original_user_id": user_id,
+                "user_name": user_name,
+                "user_message": user_message[:500],  # Truncate for metadata
+                "assistant_message": assistant_message[:500],
+            }
+        )
 
     def export_all(self, user_id: Optional[str] = None) -> dict:
         """

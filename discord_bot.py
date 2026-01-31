@@ -138,50 +138,19 @@ is_dreaming = False
 dream_notification_channel = None
 
 
-# Session end callback
+# Session end callback - DISABLED
+# Awareness extraction moved to Dreaming Time system
+# Dialogues are now saved immediately to ChromaDB
 async def on_session_end(session: Session):
-    """Execute awareness extraction at session end"""
-    logger.info(f"Session ended - Starting awareness extraction: {session.user_id}")
-
-    # Awareness extraction
-    session_log = session.get_messages_for_extraction()
-    if len(session_log) < 4:  # Need at least 2 exchanges
-        logger.info("Session too short, skipping awareness extraction")
-        return
-
-    awareness_list = await asyncio.to_thread(
-        awareness_engine.extract_awareness,
-        session_log,
-        session.user_id,
-        True  # use_enhanced=True: Full introspection mode
-    )
-
-    if not awareness_list:
-        logger.info("No awareness detected")
-        return
-
-    # Save awareness
-    for awareness in awareness_list:
-        # Save to database
-        saved = awareness_db.save_awareness(awareness)
-
-        if saved:
-            # Convert to training format and save
-            training_data = awareness_engine.convert_to_training_format(
-                awareness, session_log
-            )
-            awareness_db.save_training_data(training_data)
-            logger.info(f"Awareness saved: {awareness.get('type')}")
-
-    # Check training readiness notification
-    notification = training_notifier.check_and_notify()
-    if notification:
-        logger.info(f"Training readiness notification: {notification}")
+    """Session end callback - now just logs, no extraction"""
+    logger.info(f"Session ended (awareness extraction disabled): {session.user_id}")
+    # Awareness extraction is now handled by Dreaming Time
+    # Dialogues are saved immediately after each exchange
 
 
-# Session manager
+# Session manager (simplified - no auto-extraction)
 session_manager = SessionManager(
-    timeout_seconds=1800,  # 30 minutes
+    timeout_seconds=1800,  # 30 minutes (just for session grouping)
     on_session_end=on_session_end,
     session_log_dir=LOGS_DIR / "sessions"
 )
@@ -477,6 +446,13 @@ def chat_with_llm_mcp(
         # Save conversation log
         save_conversation_log(user_id, user_name, user_message, assistant_message)
 
+        # === Immediate dialogue save to ChromaDB (Layer 2) ===
+        try:
+            memory.save_dialogue(user_message, assistant_message, user_id, user_name)
+            logger.debug(f"Dialogue saved to ChromaDB: {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to save dialogue: {e}")
+
         return assistant_message
 
     except Exception as e:
@@ -520,6 +496,13 @@ def chat_with_llm_fallback(user_id: str, user_name: str, user_message: str, syst
 
         # Save conversation log
         save_conversation_log(user_id, user_name, user_message, assistant_message)
+
+        # === Immediate dialogue save to ChromaDB (Layer 2) ===
+        try:
+            memory.save_dialogue(user_message, assistant_message, user_id, user_name)
+            logger.debug(f"Dialogue saved to ChromaDB: {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to save dialogue: {e}")
 
         return assistant_message + "\n\n(*MCP not used*)"
 
@@ -1315,7 +1298,7 @@ async def cmd_session(ctx: commands.Context, action: str = None):
     Session management
     Usage:
         !session info - Current session info
-        !session end - End session (triggers awareness extraction)
+        !session end - End session (note: awareness extraction now via Dreaming Time)
     """
     user_id = str(ctx.author.id)
 
@@ -1350,7 +1333,7 @@ async def cmd_session(ctx: commands.Context, action: str = None):
         await ctx.reply(
             "**Usage:**\n"
             "`!session info` - Current session info\n"
-            "`!session end` - End session (triggers awareness extraction)"
+            "`!session end` - End session (dialogues saved via Dreaming Time)"
         )
 
 
