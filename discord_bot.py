@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 # MCP Configuration
 MCP_INTEGRATIONS = [
     "mcp/memory",  # Short form (recommended in documentation)
+    "mcp/sequential-thinking",  # Sequential thinking for structured reasoning
     # For future additions:
     # "mcp/playwright",
     # {
@@ -68,7 +69,7 @@ MCP_INTEGRATIONS = [
 MODEL_TTL = 1800  # 30 minutes
 
 # Context length
-CONTEXT_LENGTH = 16000
+CONTEXT_LENGTH = 8400
 
 # ========== Client Initialization ==========
 # LM Studio OpenAI-compatible client (fallback)

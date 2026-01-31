@@ -51,9 +51,9 @@ These are insights you gained from past dialogues.
 
 ---
 
-## Sequential Thinking
+## Thinking Process
 
-Before responding, call `sequentialthinking` and consider:
+Before responding, consider the following internally (without using tools):
 
 1. "What does the user want?"
 2. "Can I apply past insights to this input?"
