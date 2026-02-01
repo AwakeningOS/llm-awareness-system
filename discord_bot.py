@@ -44,7 +44,7 @@ from awareness_database import AwarenessDatabase
 from lora_trainer import LoRATrainer, TrainingNotifier
 from self_reflection import SelfReflectionEngine, RealtimeObserver
 from thinking_habits import ThinkingHabitsEngine, RealtimeThinkingHabits
-from dreaming_engine import DreamingEngine
+from dreaming_engine_v2 import DreamingEngineV2 as DreamingEngine
 
 # Logging configuration
 logging.basicConfig(format=LOG_FORMAT, level=getattr(logging, LOG_LEVEL))
@@ -69,7 +69,7 @@ MCP_INTEGRATIONS = [
 MODEL_TTL = 1800  # 30 minutes
 
 # Context length
-CONTEXT_LENGTH = 8400
+CONTEXT_LENGTH = 16000
 
 # ========== Client Initialization ==========
 # LM Studio OpenAI-compatible client (fallback)
@@ -340,24 +340,27 @@ def chat_with_llm_mcp(
     else:
         logger.info("No insights found to inject")
 
-    # Search dream insights (Core Memory from Dreaming Time)
-    dream_insights = memory.search("identity principle", user_id="global", limit=3, category="dream_insight")
+    # Load insights from insights.jsonl (新しい夢見システム)
     dream_context = ""
-    if dream_insights:
-        dream_context = "\n\n## Core Self-Understanding (From Dreaming Time):\n"
-        dream_context += "These are your deepest insights about 'What am I?' - let them guide your being.\n\n"
-        for d in dream_insights:
-            content = d.get('content', '')
-            # Clean up prefixes
-            for prefix in ['[Core Identity]', '[Unified Principle]', '[Emotional Lesson]', '[What Am I?']:
-                if prefix in content:
-                    content = content.replace(prefix, '').strip()
-            dream_context += f"- {content}\n"
-        logger.info(f"Injecting {len(dream_insights)} dream insights into system prompt")
-        for d in dream_insights[:2]:  # Log first 2
-            logger.info(f"  Dream Insight: {d.get('content', '')[:80]}...")
-    else:
-        logger.info("No dream insights found to inject")
+    try:
+        insights_file = DATA_DIR / "insights.jsonl"
+        if insights_file.exists():
+            with open(insights_file, "r", encoding="utf-8") as f:
+                all_insights = [json.loads(line.strip()) for line in f if line.strip()]
+
+            if all_insights:
+                # 最新10件を取得
+                recent_insights = all_insights[-10:]
+                dream_context = "\n\n## 過去の気づき (Dreaming Time):\n"
+                dream_context += "これらはあなたが過去の対話から得た気づきです。今回の応答に活かしてください。\n\n"
+                for entry in recent_insights:
+                    insight = entry.get('insight', '')
+                    dream_context += f"- {insight}\n"
+                logger.info(f"Injecting {len(recent_insights)} insights from insights.jsonl")
+        else:
+            logger.info("No insights.jsonl found")
+    except Exception as e:
+        logger.warning(f"Failed to load insights: {e}")
 
     # Search recent emotional states (background & emotion from thinking habits)
     emotional_states = memory.search("emotional", user_id=user_id, limit=3, category="emotional_state")
@@ -380,8 +383,36 @@ def chat_with_llm_mcp(
     else:
         logger.info("No emotional states found to inject")
 
-    # Add memory, insights, dream insights, and emotional context to system prompt
-    system_prompt = SYSTEM_PROMPT + memory_context + dream_context + insight_context + emotional_context
+    # Get recent would_improve suggestions from thinking habits
+    improvement_context = ""
+    try:
+        thinking_habits_file = DATA_DIR / "thinking_habits" / "integrated_reflections.jsonl"
+        if thinking_habits_file.exists():
+            with open(thinking_habits_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                # Get last 3 entries with would_improve
+                recent_improvements = []
+                for line in reversed(lines[-10:]):  # Check last 10
+                    try:
+                        entry = json.loads(line.strip())
+                        would_improve = entry.get("user_perspective", {}).get("would_improve")
+                        if would_improve and len(recent_improvements) < 3:
+                            recent_improvements.append(would_improve)
+                    except:
+                        continue
+
+                if recent_improvements:
+                    improvement_context = "\n\n## Recent Improvement Suggestions (From your self-reflection):\n"
+                    improvement_context += "IMPORTANT: These are areas where you identified room for improvement.\n\n"
+                    for imp in recent_improvements:
+                        improvement_context += f"- {imp}\n"
+                    improvement_context += "\nCheck: Is this response addressing these improvements?\n"
+                    logger.info(f"Injecting {len(recent_improvements)} improvement suggestions")
+    except Exception as e:
+        logger.warning(f"Failed to load improvement suggestions: {e}")
+
+    # Add memory, insights, dream insights, emotional context, and improvements to system prompt
+    system_prompt = SYSTEM_PROMPT + memory_context + dream_context + insight_context + emotional_context + improvement_context
 
     try:
         # LM Studio v1 API (0.4.0+) with MCP
@@ -417,7 +448,7 @@ def chat_with_llm_mcp(
             LM_STUDIO_MCP_URL,
             headers=get_auth_headers(),
             json=payload,
-            timeout=120
+            timeout=300  # 5分に延長（深い思考を許容）
         )
 
         logger.info(f"MCP API response: {response.status_code}")
@@ -1256,16 +1287,16 @@ async def run_dream_cycle(channel):
 
         if result["status"] == "completed":
             # Success notification
+            insights_preview = "\n".join([f"- {i}" for i in result.get('insights', [])[:3]])
             notification = (
                 f"**Dream Complete**\n\n"
                 f"I have awakened from a period of self-reflection.\n\n"
                 f"**Processed:** {result['memories_processed']} memories\n"
-                f"**Distilled:** {result['new_insights']} new insights\n"
-                f"**Released:** {result['memories_released']} memories (archived)\n"
+                f"**Insights:** {result['insights_generated']} new insights\n"
+                f"**Deleted:** {result['memories_deleted']} memories\n"
                 f"**Duration:** {result['duration_seconds']:.1f}s\n\n"
-                f"**Core Realization:**\n"
-                f"*\"{result.get('what_am_i', 'No answer generated')[:300]}...\"*\n\n"
-                f"Full report: `{result['report_path']}`"
+                f"**Today's Insights:**\n{insights_preview}\n\n"
+                f"Archive: `{result['archive_path']}`"
             )
 
             await channel.send(notification)

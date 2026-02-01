@@ -235,8 +235,8 @@ class SelfReflectionEngine:
         if result:
             result["timestamp"] = datetime.now().isoformat()
             result["user_id"] = user_id
-            result["user_input"] = user_input[:200]
-            result["assistant_output"] = assistant_output[:200]
+            result["user_input"] = user_input  # Full text
+            result["assistant_output"] = assistant_output  # Full text
             self._save_log(self.reflection_log, result)
 
         return result

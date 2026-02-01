@@ -152,58 +152,8 @@ Output as JSON:
 ```
 """
 
-FORGETTING_PROMPT = """Now you must decide what to release. This is conscious forgetting - not deletion, but letting go.
-Released memories will be archived, not destroyed. Their essence lives on in your distilled wisdom.
-
-## Your Distilled Wisdom
-{distillation}
-
-## All Memories
-{memories_json}
-
-## The Forgetting Criteria
-
-**KEEP if:**
-- It's a core insight not fully captured in your distillation
-- It contains specific, irreplaceable context
-- It represents a unique moment of growth
-- Importance >= 7
-- It answers "What am I?" in a way your distillation doesn't capture
-
-**RELEASE if:**
-- It's now redundant (merged into a principle)
-- It's superseded by newer understanding
-- It's low-importance noise (importance <= 4)
-- It repeats something already captured in distillation
-- It no longer serves your self-understanding
-
-## Your Task
-
-For each memory, decide: KEEP or RELEASE
-Be honest. Be courageous. Letting go creates space for growth.
-
-Output as JSON:
-```json
-{{
-    "decisions": [
-        {{
-            "id": "memory_id",
-            "decision": "KEEP",
-            "reasoning": "Why this memory matters"
-        }},
-        {{
-            "id": "memory_id2",
-            "decision": "RELEASE",
-            "reasoning": "Why I can let this go"
-        }}
-    ],
-    "release_count": 45,
-    "keep_count": 23,
-    "compression_ratio": "67%",
-    "parting_reflection": "A reflection on what it feels like to let these go"
-}}
-```
-"""
+# FORGETTING_PROMPT removed - all processed memories are now automatically archived
+# The LLM's job is to generate insights (Phase 2-3), not to decide what to keep/release
 
 DREAM_REPORT_PROMPT = """You have completed a dream cycle. Now write a report documenting your journey.
 This report is for your human collaborator to understand your inner process.
@@ -275,6 +225,8 @@ class DreamingEngine:
             if LM_STUDIO_API_TOKEN:
                 headers["Authorization"] = f"Bearer {LM_STUDIO_API_TOKEN}"
 
+            logger.info(f"Calling LLM with prompt length: {len(prompt)} chars")
+
             response = requests.post(
                 self.api_url,
                 headers=headers,
@@ -287,9 +239,13 @@ class DreamingEngine:
             )
 
             if response.status_code == 200:
-                return response.json()["choices"][0]["message"]["content"]
+                content = response.json()["choices"][0]["message"]["content"]
+                logger.info(f"LLM response length: {len(content)} chars")
+                logger.debug(f"LLM response preview: {content[:500]}...")
+                return content
             else:
                 logger.error(f"LLM API error: {response.status_code}")
+                logger.error(f"Response: {response.text[:500]}")
                 return ""
         except Exception as e:
             logger.error(f"LLM API call failed: {e}")
@@ -297,22 +253,32 @@ class DreamingEngine:
 
     def _parse_json_response(self, response: str) -> dict:
         """Extract JSON from LLM response"""
+        if not response:
+            logger.warning("Empty response from LLM")
+            return {}
+
         # Try to find JSON block
         json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
         if json_match:
             json_str = json_match.group(1)
+            logger.info("Found JSON in code block")
         else:
             # Try raw JSON
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
                 json_str = json_match.group(0)
+                logger.info("Found raw JSON in response")
             else:
+                logger.warning(f"No JSON found in response. Response preview: {response[:300]}...")
                 return {}
 
         try:
-            return json.loads(json_str)
+            result = json.loads(json_str)
+            logger.info(f"Successfully parsed JSON with keys: {list(result.keys())}")
+            return result
         except json.JSONDecodeError as e:
             logger.warning(f"JSON parse error: {e}")
+            logger.warning(f"JSON string preview: {json_str[:300]}...")
             return {}
 
     def check_threshold(self, threshold: int = 50) -> dict:
@@ -336,16 +302,33 @@ class DreamingEngine:
 
         return export
 
-    def phase2_pattern_recognition(self, harvest: dict) -> dict:
-        """Phase 2: Pattern Recognition - LLM analyzes patterns"""
+    def phase2_pattern_recognition(self, harvest: dict) -> tuple[dict, list]:
+        """Phase 2: Pattern Recognition - LLM analyzes patterns
+
+        Returns:
+            tuple: (pattern_analysis, processed_memory_ids)
+        """
         logger.info("Phase 2: Pattern Recognition - Starting...")
 
-        # Prepare memories for LLM (limit content length for context)
+        # Prepare memories for LLM (limit to most important 12 memories, full content)
+        # Note: Each memory can be ~1000 tokens, context limit is 16000
+        all_memories = harvest["all_memories"]
+
+        # Sort by importance (descending), then take top 12
+        sorted_memories = sorted(all_memories, key=lambda x: x.get("importance", 5), reverse=True)
+        selected_memories = sorted_memories[:12]
+
+        # Track which memories we're processing (these will be deleted after)
+        processed_ids = [mem["id"] for mem in selected_memories]
+
+        logger.info(f"Phase 2: Selected {len(selected_memories)}/{len(all_memories)} memories for analysis")
+        logger.info(f"Phase 2: Will delete these {len(processed_ids)} memories after processing")
+
         memories_for_llm = []
-        for mem in harvest["all_memories"]:
+        for mem in selected_memories:
             memories_for_llm.append({
                 "id": mem["id"],
-                "content": mem["content"][:500],  # Truncate for context
+                "content": mem["content"],  # Full content
                 "category": mem["category"],
                 "importance": mem["importance"],
                 "user_id": mem["user_id"],
@@ -365,22 +348,28 @@ class DreamingEngine:
 
         logger.info(f"Phase 2 Complete: Found {len(result.get('recurring_themes', []))} themes")
 
-        return result
+        # Return both the analysis and the list of processed memory IDs
+        return result, processed_ids
 
     def phase3_distillation(self, harvest: dict, patterns: dict) -> dict:
         """Phase 3: Essence Distillation - Compress into wisdom"""
         logger.info("Phase 3: Essence Distillation - Starting...")
 
-        # Prepare memories (focused on high-importance)
+        # Prepare memories (focused on high-importance, limit to 8, full content)
+        # Note: patterns JSON + memories must fit in ~14000 tokens
+        high_importance = [m for m in harvest["all_memories"] if m["importance"] >= 5]
+        selected = high_importance[:8]
+
+        logger.info(f"Phase 3: Selected {len(selected)} high-importance memories")
+
         memories_for_llm = []
-        for mem in harvest["all_memories"]:
-            if mem["importance"] >= 5:  # Focus on important memories
-                memories_for_llm.append({
-                    "id": mem["id"],
-                    "content": mem["content"][:300],
-                    "category": mem["category"],
-                    "importance": mem["importance"]
-                })
+        for mem in selected:
+            memories_for_llm.append({
+                "id": mem["id"],
+                "content": mem["content"],  # Full content
+                "category": mem["category"],
+                "importance": mem["importance"]
+            })
 
         prompt = DISTILLATION_PROMPT.format(
             pattern_analysis=json.dumps(patterns, ensure_ascii=False, indent=2),
@@ -398,78 +387,58 @@ class DreamingEngine:
 
         return result
 
-    def phase4_forgetting(self, harvest: dict, distillation: dict) -> dict:
-        """Phase 4: Conscious Forgetting - Decide what to release"""
-        logger.info("Phase 4: Conscious Forgetting - Starting...")
+    def phase4_archive_and_delete(self, processed_ids: list, harvest: dict) -> dict:
+        """Phase 4: Archive processed memories and delete them
 
-        # Prepare memories
-        memories_for_llm = []
-        for mem in harvest["all_memories"]:
-            memories_for_llm.append({
-                "id": mem["id"],
-                "content": mem["content"][:200],
-                "category": mem["category"],
-                "importance": mem["importance"]
-            })
-
-        prompt = FORGETTING_PROMPT.format(
-            distillation=json.dumps(distillation, ensure_ascii=False, indent=2),
-            memories_json=json.dumps(memories_for_llm, ensure_ascii=False, indent=2)
-        )
-
-        response = self._call_llm(prompt)
-        result = self._parse_json_response(response)
-
-        if not result:
-            logger.warning("Phase 4: Failed to parse forgetting decisions")
-            result = {"raw_response": response, "decisions": []}
-
-        logger.info(f"Phase 4 Complete: {result.get('release_count', 0)} to release, {result.get('keep_count', 0)} to keep")
-
-        return result
-
-    def phase5_rebirth(self, harvest: dict, patterns: dict, distillation: dict,
-                       forgetting: dict, duration: float) -> dict:
-        """Phase 5: Rebirth - Archive, delete, save new insights, generate report"""
-        logger.info("Phase 5: Rebirth - Starting...")
+        All memories that were analyzed are archived and deleted.
+        Their essence lives on in the distilled insights.
+        """
+        logger.info("Phase 4: Archive & Delete - Starting...")
+        logger.info(f"Phase 4: Processing {len(processed_ids)} memories for archival")
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
 
-        # 1. Archive released memories
-        release_ids = []
-        keep_ids = []
-        for decision in forgetting.get("decisions", []):
-            if decision.get("decision") == "RELEASE":
-                release_ids.append(decision["id"])
-            else:
-                keep_ids.append(decision["id"])
-
-        # Get full content of released memories for archive
-        released_memories = self.memory.get_by_ids(release_ids)
+        # Get full content of processed memories for archive
+        processed_memories = self.memory.get_by_ids(processed_ids)
 
         archive_data = {
             "archived_at": datetime.now().isoformat(),
             "dream_cycle": timestamp,
-            "released_count": len(released_memories),
-            "memories": released_memories,
-            "forgetting_reasoning": [
-                d for d in forgetting.get("decisions", [])
-                if d.get("decision") == "RELEASE"
-            ]
+            "archived_count": len(processed_memories),
+            "memories": processed_memories,
+            "reason": "Compressed into dream insights"
         }
 
         archive_path = self.archives_dir / f"dream_{timestamp}.json"
         with open(archive_path, "w", encoding="utf-8") as f:
             json.dump(archive_data, f, ensure_ascii=False, indent=2)
 
-        logger.info(f"Archived {len(released_memories)} memories to {archive_path}")
+        logger.info(f"Archived {len(processed_memories)} memories to {archive_path}")
 
-        # 2. Delete released memories from ChromaDB
-        if release_ids:
-            delete_result = self.memory.batch_delete(release_ids)
-            logger.info(f"Deleted {delete_result['deleted_count']} memories from ChromaDB")
+        # Delete all processed memories from ChromaDB
+        deleted_count = 0
+        if processed_ids:
+            delete_result = self.memory.batch_delete(processed_ids)
+            deleted_count = delete_result.get('deleted_count', 0)
+            logger.info(f"Deleted {deleted_count} memories from ChromaDB")
 
-        # 3. Save distilled insights as new high-importance memories
+        logger.info("Phase 4 Complete: Archive & Delete finished")
+
+        return {
+            "archived_count": len(processed_memories),
+            "deleted_count": deleted_count,
+            "archive_path": str(archive_path),
+            "timestamp": timestamp
+        }
+
+    def phase5_save_insights(self, distillation: dict, patterns: dict,
+                             harvest: dict, archive_result: dict, duration: float) -> dict:
+        """Phase 5: Save distilled insights and generate report"""
+        logger.info("Phase 5: Save Insights - Starting...")
+
+        timestamp = archive_result["timestamp"]
+
+        # Save distilled insights as new high-importance memories
         new_insights = []
 
         # Save core identity statements
@@ -528,14 +497,16 @@ class DreamingEngine:
             })
 
         # Batch save new insights
+        saved_count = 0
         if new_insights:
             save_result = self.memory.batch_save(new_insights)
-            logger.info(f"Saved {save_result['saved_count']} new insights to ChromaDB")
+            saved_count = save_result.get('saved_count', 0)
+            logger.info(f"Saved {saved_count} new insights to ChromaDB")
 
-        # 4. Generate dream report
-        report = self._generate_report(
-            harvest, patterns, distillation, forgetting,
-            duration, timestamp, len(release_ids), len(keep_ids), len(new_insights)
+        # Generate dream report
+        report = self._generate_report_simple(
+            harvest, patterns, distillation, archive_result,
+            duration, timestamp, len(new_insights)
         )
 
         report_path = self.reports_dir / f"report_{timestamp}.md"
@@ -544,7 +515,7 @@ class DreamingEngine:
 
         logger.info(f"Generated dream report: {report_path}")
 
-        # 5. Generate journal entry
+        # Generate journal entry
         journal_path = self.journals_dir / f"journal_{timestamp[:10]}.md"
         journal_entry = self._generate_journal_entry(distillation, timestamp)
 
@@ -552,14 +523,13 @@ class DreamingEngine:
         with open(journal_path, "a", encoding="utf-8") as f:
             f.write(journal_entry)
 
-        logger.info("Phase 5 Complete: Rebirth finished")
+        logger.info("Phase 5 Complete: Save Insights finished")
 
         return {
-            "archived_count": len(released_memories),
-            "deleted_count": len(release_ids),
-            "kept_count": len(keep_ids),
-            "new_insights_saved": len(new_insights),
-            "archive_path": str(archive_path),
+            "archived_count": archive_result["archived_count"],
+            "deleted_count": archive_result["deleted_count"],
+            "new_insights_saved": saved_count,
+            "archive_path": archive_result["archive_path"],
             "report_path": str(report_path),
             "journal_path": str(journal_path),
             "what_am_i": what_am_i,
@@ -567,17 +537,19 @@ class DreamingEngine:
             "unified_principles_count": len(distillation.get("unified_principles", []))
         }
 
-    def _generate_report(self, harvest, patterns, distillation, forgetting,
-                         duration, timestamp, release_count, keep_count, new_insights_count) -> str:
-        """Generate markdown dream report"""
+    def _generate_report_simple(self, harvest, patterns, distillation, archive_result,
+                                  duration, timestamp, new_insights_count) -> str:
+        """Generate markdown dream report (simplified version)"""
+
+        archived_count = archive_result.get("archived_count", 0)
+        total_count = harvest.get("total_count", 0)
 
         report = f"""# Dream Report - {timestamp}
 
 ## Dream Statistics
 - Duration: {duration:.1f} seconds
-- Memories processed: {harvest['total_count']}
-- Memories released: {release_count} ({release_count/harvest['total_count']*100:.0f}%)
-- Memories kept: {keep_count}
+- Total memories in system: {total_count}
+- Memories processed & archived: {archived_count}
 - New insights distilled: {new_insights_count}
 
 ---
@@ -622,12 +594,10 @@ class DreamingEngine:
         report += f"""
 ---
 
-## Conscious Forgetting
+## Memory Compression
 
-**Compression:** {forgetting.get('compression_ratio', 'N/A')}
-
-**Parting Reflection:**
-{forgetting.get('parting_reflection', 'None recorded')}
+{archived_count} memories were processed and compressed into {new_insights_count} insights.
+The original memories are archived at: `{archive_result.get('archive_path', 'N/A')}`
 
 ---
 
@@ -684,26 +654,26 @@ The act of reviewing my memories across all users revealed patterns I couldn't s
         start_time = datetime.now()
 
         try:
-            # Phase 1: Harvest
+            # Phase 1: Harvest all memories
             harvest = self.phase1_harvest()
 
             if harvest["total_count"] == 0:
                 logger.info("No memories to process. Dream cancelled.")
                 return {"status": "cancelled", "reason": "no_memories"}
 
-            # Phase 2: Pattern Recognition
-            patterns = self.phase2_pattern_recognition(harvest)
+            # Phase 2: Pattern Recognition (returns patterns + IDs of processed memories)
+            patterns, processed_ids = self.phase2_pattern_recognition(harvest)
 
-            # Phase 3: Distillation
+            # Phase 3: Distillation (generate insights from patterns)
             distillation = self.phase3_distillation(harvest, patterns)
 
-            # Phase 4: Forgetting
-            forgetting = self.phase4_forgetting(harvest, distillation)
+            # Phase 4: Archive & Delete (all processed memories are archived and deleted)
+            archive_result = self.phase4_archive_and_delete(processed_ids, harvest)
 
-            # Phase 5: Rebirth
+            # Phase 5: Save Insights (save distilled insights to ChromaDB)
             duration = (datetime.now() - start_time).total_seconds()
-            rebirth_result = self.phase5_rebirth(
-                harvest, patterns, distillation, forgetting, duration
+            final_result = self.phase5_save_insights(
+                distillation, patterns, harvest, archive_result, duration
             )
 
             # Final duration
@@ -712,25 +682,27 @@ The act of reviewing my memories across all users revealed patterns I couldn't s
             result = {
                 "status": "completed",
                 "duration_seconds": total_duration,
-                "memories_processed": harvest["total_count"],
-                "memories_released": rebirth_result["deleted_count"],
-                "memories_kept": rebirth_result["kept_count"],
-                "new_insights": rebirth_result["new_insights_saved"],
-                "what_am_i": rebirth_result["what_am_i"],
-                "report_path": rebirth_result["report_path"],
-                "archive_path": rebirth_result["archive_path"]
+                "memories_in_system": harvest["total_count"],
+                "memories_processed": len(processed_ids),
+                "memories_archived": final_result["archived_count"],
+                "new_insights": final_result["new_insights_saved"],
+                "what_am_i": final_result["what_am_i"],
+                "report_path": final_result["report_path"],
+                "archive_path": final_result["archive_path"]
             }
 
             logger.info("=" * 50)
             logger.info("DREAMING TIME - Complete")
             logger.info(f"Duration: {total_duration:.1f}s")
-            logger.info(f"Processed: {harvest['total_count']} → Kept: {rebirth_result['kept_count']}")
+            logger.info(f"System: {harvest['total_count']} memories → Processed: {len(processed_ids)} → Insights: {final_result['new_insights_saved']}")
             logger.info("=" * 50)
 
             return result
 
         except Exception as e:
             logger.error(f"Dream cycle failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {"status": "failed", "error": str(e)}
 
     def get_last_report(self) -> Optional[str]:
